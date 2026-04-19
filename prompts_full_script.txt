@@ -1,0 +1,80 @@
+-- =====================================================
+-- FULL TRUTH OR DARE PROMPTS INSERT SCRIPT
+-- =====================================================
+
+-- =========================
+-- TRUTHS - FRIEND
+-- =========================
+INSERT INTO prompts (type, difficulty, game_type, text) VALUES
+('truth', 'easy', 'friend', 'What is your favorite movie?'),
+('truth', 'easy', 'friend', 'What is your favorite music?'),
+('truth', 'easy', 'friend', 'What is your favorite game?'),
+('truth', 'easy', 'friend', 'What is your birthday?'),
+('truth', 'easy', 'friend', 'What is your favorite color?'),
+('truth', 'hard', 'friend', 'What is your greatest fear?'),
+('truth', 'hard', 'friend', 'Have you ever smoked or drank alcohol?'),
+('truth', 'hard', 'friend', 'Who is your role model?'),
+('truth', 'hard', 'friend', 'What is your worst mistake?'),
+('truth', 'hard', 'friend', 'Who do you hate?');
+
+-- =========================
+-- TRUTHS - BEST FRIEND
+-- =========================
+INSERT INTO prompts (type, difficulty, game_type, text) VALUES
+('truth', 'easy', 'best_friend', 'Have you ever cried for love?'),
+('truth', 'easy', 'best_friend', 'Who is your best friend?'),
+('truth', 'easy', 'best_friend', 'Someone you would die for?'),
+('truth', 'hard', 'best_friend', 'Tell me your deepest secret'),
+('truth', 'hard', 'best_friend', 'Have you ever had a crush on me?'),
+('truth', 'hard', 'best_friend', 'What turns you on (mild)?'),
+('truth', 'hard', 'best_friend', 'What is your obsession?'),
+('truth', 'hard', 'best_friend', 'What do you like in a boy or girl?');
+
+-- =========================
+-- TRUTHS - RELATIONSHIP
+-- =========================
+INSERT INTO prompts (type, difficulty, game_type, text) VALUES
+('truth', 'easy', 'relationship', 'Do you love me?'),
+('truth', 'easy', 'relationship', 'Who do you like?'),
+('truth', 'easy', 'relationship', 'What romantic name would you like to call me?'),
+('truth', 'hard', 'relationship', 'Favorite sexual style/position'),
+('truth', 'hard', 'relationship', 'How long can you last during sex?'),
+('truth', 'hard', 'relationship', 'Which part of my body do you love most?'),
+('truth', 'spicy', 'relationship', 'Send me your nude pic'),
+('truth', 'spicy', 'relationship', 'If we were alone on bed, what would you do to me?'),
+('truth', 'spicy', 'relationship', 'Will you ever have sex with me?'),
+('truth', 'spicy', 'relationship', 'Send me your boobs/chest pic'),
+('truth', 'spicy', 'relationship', 'Will you allow me to suck you?');
+
+-- =========================
+-- DARES - FRIEND
+-- =========================
+INSERT INTO prompts (type, difficulty, game_type, text) VALUES
+('dare', 'easy', 'friend', 'Take me out for lunch'),
+('dare', 'easy', 'friend', 'Buy us food'),
+('dare', 'easy', 'friend', 'Call me now'),
+('dare', 'hard', 'friend', 'Send me a screenshot of your chat with your crush'),
+('dare', 'hard', 'friend', 'Put my pic on your dp');
+
+-- =========================
+-- DARES - BEST FRIEND
+-- =========================
+INSERT INTO prompts (type, difficulty, game_type, text) VALUES
+('dare', 'easy', 'best_friend', 'Do a combination of my name and your name'),
+('dare', 'hard', 'best_friend', 'Post my picture on your status for 24 hours'),
+('dare', 'hard', 'best_friend', 'Kiss me on the cheek next time you see me'),
+('dare', 'hard', 'best_friend', 'Send me your cutest pic'),
+('dare', 'hard', 'best_friend', 'Send me a voice note telling me something you never told anyone');
+
+-- =========================
+-- DARES - RELATIONSHIP
+-- =========================
+INSERT INTO prompts (type, difficulty, game_type, text) VALUES
+('dare', 'easy', 'relationship', 'Kiss me for 10 minutes next time we meet'),
+('dare', 'hard', 'relationship', 'Finger or play with me'),
+('dare', 'spicy', 'relationship', 'Have sex with me'),
+('dare', 'spicy', 'relationship', 'Snap half naked and send it to me'),
+('dare', 'spicy', 'relationship', 'Send me your boobs/chest pic'),
+('dare', 'spicy', 'relationship', 'Send me your nude pic'),
+('dare', 'spicy', 'relationship', 'Do a sexy dance for me'),
+('dare', 'spicy', 'relationship', 'Roleplay a sexy scene with me');
