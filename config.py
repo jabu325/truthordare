@@ -1,1 +1,13 @@
-TOKEN = "PASTE YOUR BOT TOKEN HERE"
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+
+if not TOKEN:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")

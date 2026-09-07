@@ -577,7 +577,15 @@ def main():
     init_db()
     seed_prompts()
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .get_updates_read_timeout(30)
+        .get_updates_write_timeout(10)
+        .get_updates_connect_timeout(10)
+        .get_updates_pool_timeout(10)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("newgame", newgame))
@@ -591,7 +599,11 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer))
     app.add_handler(CommandHandler("stop", stop))
     print("Bot is running...")
-    app.run_polling()
+    app.run_polling(
+        poll_interval=0.0,
+        timeout=20,
+        bootstrap_retries=-1,
+    )
     
 
 
