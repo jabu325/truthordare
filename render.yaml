@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: truth-or-dare
+    name: truthdare
     runtime: python
     plan: free
     rootDir: web
