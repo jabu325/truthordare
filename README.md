@@ -82,9 +82,22 @@ python manage.py import_prompts
 When using PostgreSQL, set `DATABASE_URL` in the environment. For production,
 also set a strong `SECRET_KEY`, `DEBUG=False`, and `ALLOWED_HOSTS` to the
 deployed hostname. Serve the app over HTTPS for PWA installation. The web
-project does not yet include a hosting-provider-specific deployment
-configuration; use persistent PostgreSQL storage rather than relying on an
-ephemeral host filesystem for game data.
+app includes a Render deployment configuration; use persistent PostgreSQL
+storage rather than relying on an ephemeral host filesystem for game data.
+
+### Deploying on Render
+
+The repository includes a Render Blueprint in `render.yaml`. In Render, create
+a new Blueprint from this repository and provide `DATABASE_URL` when prompted.
+Use the PostgreSQL connection URL for your database; for a Render PostgreSQL
+database in the same region, use its internal connection URL. The Blueprint
+installs the web requirements, collects static files during the build, applies
+database migrations at startup, and launches Django through Gunicorn.
+
+The Render hostname is added to Django's allowed hosts and trusted HTTPS
+origins automatically. If you use a custom domain, add it to both the
+`ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` environment variables, as applicable.
+Do not set `DEBUG=True` in production.
 
 ## Data and secrets
 
