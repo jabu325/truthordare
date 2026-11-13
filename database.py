@@ -3,7 +3,7 @@ from pathlib import Path
 import random
 import string
 
-DB_NAME = "truth_or_dare.db"
+DB_NAME = Path(__file__).resolve().parent / "truth_or_dare.db"
 
 def get_connection():
     return sqlite3.connect(DB_NAME)
@@ -17,7 +17,8 @@ def init_db():
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id INTEGER UNIQUE NOT NULL,
-        username TEXT
+        username TEXT,
+        display_name TEXT
     )
     """)
 
@@ -37,9 +38,21 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         game_code TEXT,
         challenged_player INTEGER,
+        challenged_player_name TEXT,
+        selected_by INTEGER,
+        selected_by_name TEXT,
         prompt_type TEXT,
         prompt_text TEXT,
         answer_text TEXT,
+        answerer_id INTEGER,
+        answerer_name TEXT,
+        answer_type TEXT,
+        answer_file_id TEXT,
+        answer_file_unique_id TEXT,
+        answer_media_kind TEXT,
+        answer_media_path TEXT,
+        answer_caption TEXT,
+        answered_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -81,19 +94,52 @@ def init_db():
     )
     """)
 
+    _ensure_columns(cursor, "users", {
+        "display_name": "TEXT",
+    })
+    _ensure_columns(cursor, "game_history", {
+        "challenged_player_name": "TEXT",
+        "selected_by": "INTEGER",
+        "selected_by_name": "TEXT",
+        "answerer_id": "INTEGER",
+        "answerer_name": "TEXT",
+        "answer_type": "TEXT",
+        "answer_file_id": "TEXT",
+        "answer_file_unique_id": "TEXT",
+        "answer_media_kind": "TEXT",
+        "answer_media_path": "TEXT",
+        "answer_caption": "TEXT",
+        "answered_at": "TIMESTAMP",
+    })
+
     conn.commit()
     conn.close()
 
-def create_or_update_user(telegram_id: int, username: str):
+def _ensure_columns(cursor, table_name: str, columns: dict):
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing = {row[1] for row in cursor.fetchall()}
+    for column_name, column_type in columns.items():
+        if column_name not in existing:
+            cursor.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+            )
+
+
+def create_or_update_user(
+    telegram_id: int,
+    username: str,
+    display_name: str | None = None,
+):
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO users (telegram_id, username)
-        VALUES (?, ?)
+        INSERT INTO users (telegram_id, username, display_name)
+        VALUES (?, ?, ?)
         ON CONFLICT(telegram_id) DO UPDATE SET
-        username=excluded.username
-    """, (telegram_id, username))
+        username=excluded.username,
+        display_name=COALESCE(excluded.display_name, users.display_name)
+    """, (telegram_id, username, display_name))
 
     conn.commit()
     conn.close()
@@ -295,6 +341,150 @@ def get_active_game_by_user(telegram_id: int):
     conn.close()
 
     return game
+
+
+def get_game_by_user(telegram_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT code, player1_id, player2_id, state
+        FROM games
+        WHERE player1_id = ? OR player2_id = ?
+        ORDER BY rowid DESC
+        LIMIT 1
+    """, (telegram_id, telegram_id))
+    game = cursor.fetchone()
+    conn.close()
+    return game
+
+
+def get_user_display_name(telegram_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT display_name, username FROM users WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    result = cursor.fetchone()
+    conn.close()
+    if not result:
+        return str(telegram_id)
+    return result[0] or result[1] or str(telegram_id)
+
+
+def record_prompt(
+    code: str,
+    challenged_player: int,
+    challenged_player_name: str,
+    selected_by: int,
+    selected_by_name: str,
+    prompt_type: str,
+    prompt_text: str,
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO game_history (
+            game_code,
+            challenged_player,
+            challenged_player_name,
+            selected_by,
+            selected_by_name,
+            prompt_type,
+            prompt_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        code,
+        challenged_player,
+        challenged_player_name,
+        selected_by,
+        selected_by_name,
+        prompt_type,
+        prompt_text,
+    ))
+    conn.commit()
+    conn.close()
+
+
+def record_answer(
+    code: str,
+    answerer_id: int,
+    answerer_name: str,
+    answer_type: str,
+    answer_text: str | None = None,
+    answer_file_id: str | None = None,
+    answer_file_unique_id: str | None = None,
+    answer_media_kind: str | None = None,
+    answer_media_path: str | None = None,
+    answer_caption: str | None = None,
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE game_history
+        SET answer_text = ?,
+            answerer_id = ?,
+            answerer_name = ?,
+            answer_type = ?,
+            answer_file_id = ?,
+            answer_file_unique_id = ?,
+            answer_media_kind = ?,
+            answer_media_path = ?,
+            answer_caption = ?,
+            answered_at = CURRENT_TIMESTAMP
+        WHERE id = (
+            SELECT id FROM game_history
+            WHERE game_code = ?
+              AND challenged_player = ?
+              AND answer_text IS NULL
+              AND answer_file_id IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+        )
+    """, (
+        answer_text,
+        answerer_id,
+        answerer_name,
+        answer_type,
+        answer_file_id,
+        answer_file_unique_id,
+        answer_media_kind,
+        answer_media_path,
+        answer_caption,
+        code,
+        answerer_id,
+    ))
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def get_transcript(code: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT challenged_player_name,
+               challenged_player,
+               selected_by_name,
+               selected_by,
+               prompt_type,
+               prompt_text,
+               answerer_name,
+               answerer_id,
+               answer_type,
+               answer_text,
+               answer_file_id,
+               answer_caption,
+               created_at,
+               answered_at
+        FROM game_history
+        WHERE game_code = ?
+        ORDER BY id
+    """, (code,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
 
 def seed_prompts():

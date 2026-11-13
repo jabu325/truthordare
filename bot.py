@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from telegram import Update
 from database import join_game
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,6 +12,11 @@ from database import (
     get_random_prompts,
     update_game_prompt_options,
     get_game_prompt_options,
+    get_game_by_user,
+    get_transcript,
+    get_user_display_name,
+    record_answer,
+    record_prompt,
     get_full_game_state_by_user,
     restart_game_by_user,
     switch_turn
@@ -28,19 +34,28 @@ from telegram.ext import (
 )
 
 from config import TOKEN
+from admin_server import start_server
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
+
+async def safe_reply(message, text):
+    try:
+        await message.reply_text(text)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not send media status reply")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     telegram_id = user.id
     username = user.username or "NoUsername"
+    display_name = user.full_name or username
 
-    create_or_update_user(telegram_id, username)
+    create_or_update_user(telegram_id, username, display_name)
 
     await update.message.reply_text(
         "Welcome to Truth or Dare 🎭\n\n"
@@ -71,6 +86,11 @@ async def newgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     telegram_id = user.id
+    create_or_update_user(
+        telegram_id,
+        user.username or "NoUsername",
+        user.full_name or user.username or str(telegram_id),
+    )
 
     if len(context.args) != 1:
         await update.message.reply_text("Usage: /join CODE")
@@ -486,18 +506,29 @@ async def handle_prompt_selection(update: Update, context: ContextTypes.DEFAULT_
     conn.close()
 
     await query.edit_message_text("✅ Prompt selected!... waiting for response.")
-    conn = get_connection()
-    cursor = conn.cursor()
+    record_prompt(
+        code=code,
+        challenged_player=current_turn,
+        challenged_player_name=(
+            get_user_display_name(current_turn)
+        ),
+        selected_by=telegram_id,
+        selected_by_name=get_user_display_name(telegram_id),
+        prompt_type=context.user_data.get("selected_type") or "unknown",
+        prompt_text=selected_prompt,
+    )
 
-    cursor.execute("""
-        INSERT INTO game_history (game_code, challenged_player, prompt_type, prompt_text)
-        VALUES (?, ?, ?, ?)
-    """, (code, current_turn, context.user_data.get("selected_type"), selected_prompt))
-
-    conn.commit()
-    conn.close()
-
-async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _finish_answer(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    answer_type: str,
+    answer_text: str | None = None,
+    answer_file_id: str | None = None,
+    answer_file_unique_id: str | None = None,
+    answer_media_kind: str | None = None,
+    answer_media_path: str | None = None,
+    answer_caption: str | None = None,
+):
     user = update.effective_user
     telegram_id = user.id
 
@@ -516,29 +547,55 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if telegram_id != current_turn:
         return
 
-    answer = update.message.text
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        UPDATE game_history
-        SET answer_text = ?
-        WHERE game_code = ?
-        AND challenged_player = ?
-        AND answer_text IS NULL
-        ORDER BY id DESC
-        LIMIT 1
-    """, (answer, code, telegram_id))
-
-    conn.commit()
-    conn.close()
+    answerer_name = user.full_name or user.username or str(telegram_id)
+    record_answer(
+        code=code,
+        answerer_id=telegram_id,
+        answerer_name=answerer_name,
+        answer_type=answer_type,
+        answer_text=answer_text,
+        answer_file_id=answer_file_id,
+        answer_file_unique_id=answer_file_unique_id,
+        answer_media_kind=answer_media_kind,
+        answer_media_path=answer_media_path,
+        answer_caption=answer_caption,
+    )
     # Send answer to opponent
     other_player = player2_id if telegram_id == player1_id else player1_id
 
-    await context.bot.send_message(
-        chat_id=other_player,
-        text=f"💬 Your opponent answered:\n\n{answer}"
+    media_caption = (
+        f"{answerer_name} answered with {answer_media_kind or 'media'}."
+        + (f"\n\n{answer_caption}" if answer_caption else "")
     )
+    if answer_media_kind == "photo":
+        await context.bot.send_photo(
+            chat_id=other_player,
+            photo=answer_file_id,
+            caption=f"🖼️ {media_caption}",
+        )
+    elif answer_media_kind == "video":
+        await context.bot.send_video(
+            chat_id=other_player,
+            video=answer_file_id,
+            caption=f"🎥 {media_caption}",
+        )
+    elif answer_media_kind == "animation":
+        await context.bot.send_animation(
+            chat_id=other_player,
+            animation=answer_file_id,
+            caption=f"🎞️ {media_caption}",
+        )
+    elif answer_media_kind in {"image_document", "video_document"}:
+        await context.bot.send_document(
+            chat_id=other_player,
+            document=answer_file_id,
+            caption=f"📎 {media_caption}",
+        )
+    else:
+        await context.bot.send_message(
+            chat_id=other_player,
+            text=f"💬 {answerer_name} answered:\n\n{answer_text}"
+        )
 
     # Determine next turn
     next_turn = other_player
@@ -572,10 +629,170 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
+
+async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _finish_answer(
+        update,
+        context,
+        answer_type="text",
+        answer_text=update.message.text,
+    )
+
+
+async def handle_image_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    document_name = (message.document.file_name or "").lower() if message.document else ""
+    image_document = (
+        message.document
+        and (
+            (message.document.mime_type or "").startswith("image/")
+            or document_name.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".heic", ".avif"))
+        )
+    )
+    video_document = (
+        message.document
+        and (
+            (message.document.mime_type or "").startswith("video/")
+            or document_name.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi", ".mpeg", ".m4v"))
+        )
+    )
+    if message.photo:
+        media = max(message.photo, key=lambda item: (item.width or 0) * (item.height or 0))
+        media_kind = "photo"
+    elif message.video:
+        media = message.video
+        media_kind = "video"
+    elif message.animation:
+        media = message.animation
+        media_kind = "animation"
+    elif image_document:
+        media = message.document
+        media_kind = "image_document"
+    elif video_document:
+        media = message.document
+        media_kind = "video_document"
+    else:
+        await safe_reply(message, "Please send a supported image or video as your answer.")
+        return
+
+    try:
+        telegram_file = await context.bot.get_file(media.file_id)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not retrieve media with get_file")
+        await safe_reply(message, "I could not retrieve that media from Telegram. Please try sending it again.")
+        return
+    media_dir = Path(__file__).resolve().parent / "media" / "answers"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    extension = Path(telegram_file.file_path or "answer.bin").suffix.lower() or ".bin"
+    if not extension.isalnum() and not (
+        extension.startswith(".") and extension[1:].replace("_", "").isalnum()
+    ):
+        extension = ".bin"
+    local_path = media_dir / f"{media.file_unique_id}{extension}"
+    try:
+        await telegram_file.download_to_drive(
+            custom_path=local_path,
+            read_timeout=180,
+            write_timeout=60,
+            connect_timeout=30,
+            pool_timeout=30,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Could not download media")
+        await safe_reply(message, "I could not download that media. Please try a smaller file or send it again.")
+        return
+
+    await _finish_answer(
+        update,
+        context,
+        answer_type="media",
+        answer_file_id=media.file_id,
+        answer_file_unique_id=media.file_unique_id,
+        answer_media_kind=media_kind,
+        answer_media_path=str(local_path),
+        answer_caption=message.caption,
+    )
+
+
+async def transcript(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    game = get_game_by_user(update.effective_user.id)
+
+    if not game:
+        await update.message.reply_text("❌ No game session found.")
+        return
+
+    code, player1_id, player2_id, state = game
+    rows = get_transcript(code)
+    if not rows:
+        await update.message.reply_text(
+            f"📝 Session {code} has no completed questions yet."
+        )
+        return
+
+    lines = [
+        f"📝 *Truth or Dare transcript*",
+        f"Session: `{code}`",
+        f"Status: `{state}`",
+        f"Players: `{player1_id}` and `{player2_id or 'waiting'}`",
+        "",
+    ]
+
+    for index, row in enumerate(rows, start=1):
+        (
+            challenged_name,
+            challenged_id,
+            selected_name,
+            selected_id,
+            prompt_type,
+            prompt_text,
+            answerer_name,
+            answerer_id,
+            answer_type,
+            answer_text,
+            answer_file_id,
+            answer_caption,
+            created_at,
+            answered_at,
+        ) = row
+        lines.extend([
+            f"*Round {index}* ({prompt_type.upper()})",
+            f"Question chosen by {selected_name} (`{selected_id}`)",
+            f"For {challenged_name} (`{challenged_id}`): {prompt_text}",
+        ])
+        if answer_type and answer_type not in {"text", "pending"} or answer_file_id:
+            answer_summary = f"📎 {answer_type or 'Media'} answer"
+            if answer_caption:
+                answer_summary += f": {answer_caption}"
+        elif answer_text:
+            answer_summary = answer_text
+        else:
+            answer_summary = "(no answer yet)"
+        if answerer_name:
+            lines.append(
+                f"Answer by {answerer_name} (`{answerer_id}`): {answer_summary}"
+            )
+        else:
+            lines.append(f"Answer: {answer_summary}")
+        lines.append(f"Recorded: {created_at or 'unknown'}")
+        if answered_at:
+            lines.append(f"Answered: {answered_at}")
+        lines.append("")
+
+    transcript_text = "\n".join(lines)
+    for start in range(0, len(transcript_text), 3800):
+        await update.message.reply_text(
+            transcript_text[start:start + 3800],
+            parse_mode="Markdown",
+        )
+
 def main():
     
     init_db()
     seed_prompts()
+
+    admin_server = start_server()
+    admin_host, admin_port = admin_server.server_address
+    print(f"Admin server listening at http://{admin_host}:{admin_port}", flush=True)
 
     app = (
         ApplicationBuilder()
@@ -584,6 +801,10 @@ def main():
         .get_updates_write_timeout(10)
         .get_updates_connect_timeout(10)
         .get_updates_pool_timeout(10)
+        .read_timeout(180)
+        .write_timeout(60)
+        .connect_timeout(30)
+        .pool_timeout(30)
         .build()
     )
 
@@ -596,14 +817,27 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_choice, pattern="^(truth|dare)$"))
     app.add_handler(CallbackQueryHandler(handle_prompt_selection, pattern="^select_"))
     app.add_handler(CommandHandler("resume", resume))
+    app.add_handler(CommandHandler("transcript", transcript))
+    app.add_handler(
+        MessageHandler(
+            filters.PHOTO
+            | filters.VIDEO
+            | filters.ANIMATION
+            | filters.Document.ALL,
+            handle_image_answer,
+        )
+    )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer))
     app.add_handler(CommandHandler("stop", stop))
     print("Bot is running...")
-    app.run_polling(
-        poll_interval=0.0,
-        timeout=20,
-        bootstrap_retries=-1,
-    )
+    try:
+        app.run_polling(
+            poll_interval=0.0,
+            timeout=20,
+            bootstrap_retries=-1,
+        )
+    finally:
+        admin_server.shutdown()
     
 
 

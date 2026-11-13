@@ -1,0 +1,175 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#10090e">
+    <meta name="description" content="A two-player Truth or Dare arcade for friends.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="{% static 'games/manifest.webmanifest' %}">
+    <link rel="icon" href="{% static 'games/icons/icon-192.png' %}" type="image/png">
+    <link rel="apple-touch-icon" href="{% static 'games/icons/icon-192.png' %}">
+    <title>Truth or Dare Arcade</title>
+    <link rel="stylesheet" href="{% static 'games/style.css' %}">
+</head>
+
+<body>
+    <main class="page-shell home-shell">
+        <header class="brand-lockup">
+            <img class="brand-logo brand-mark" src="{% static 'games/icons/truth-or-dare-logo.jpg' %}" alt="Truth or Dare">
+            <div>
+                <p class="eyebrow">THE FRIENDSHIP ARCADE</p>
+                <h1>Truth <span>or</span> Dare</h1>
+            </div>
+            <button class="install-app-button" type="button" data-install-app hidden>
+                Install app
+            </button>
+        </header>
+
+        <section class="chat-panel home-chat" aria-label="Start a game">
+            <div class="chat-topbar">
+                <span class="live-dot"></span>
+                <span>ARCADE LOBBY</span>
+                <span class="topbar-status">2 PLAYERS · 1 ROOM</span>
+            </div>
+
+            <div class="chat-feed">
+                <div class="message-row">
+                    <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                    <div class="message-stack">
+                        <span class="message-author">THE GAME MASTER</span>
+                        <div class="bubble bubble-pink">
+                            Ready to find out what your friends are really like?
+                            Create a room, invite someone, and let the chaos begin.
+                        </div>
+                        <span class="message-time">NO JUDGEMENT. MOSTLY.</span>
+                    </div>
+                </div>
+
+                {% if messages %}
+                    <div class="notice-list" role="status">
+                        {% for message in messages %}
+                            <p class="notice">{{ message }}</p>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                <div class="lobby-grid">
+                    <section class="lobby-card">
+                        <div class="card-heading">
+                            <span class="card-icon">✦</span>
+                            <div>
+                                <p class="eyebrow">HOST A SESSION</p>
+                                <h2>Start a new game</h2>
+                            </div>
+                        </div>
+                        <form method="POST" action="{% url 'games:create_room' %}" class="stack-form">
+                            {% csrf_token %}
+                            <label for="create-nickname">Your nickname</label>
+                            <input
+                                id="create-nickname"
+                                type="text"
+                                name="nickname"
+                                maxlength="24"
+                                placeholder="What should we call you?"
+                                autocomplete="nickname"
+                                required
+                            >
+                            <button class="button button-pink" type="submit">
+                                Create room <span aria-hidden="true">↗</span>
+                            </button>
+                        </form>
+                    </section>
+
+                    <section class="lobby-card lobby-card-purple">
+                        <div class="card-heading">
+                            <span class="card-icon">⌁</span>
+                            <div>
+                                <p class="eyebrow">JOIN THE PARTY</p>
+                                <h2>Got an invite code?</h2>
+                            </div>
+                        </div>
+                        <form method="POST" action="{% url 'games:join_room' %}" class="stack-form">
+                            {% csrf_token %}
+                            <label for="join-nickname">Your nickname</label>
+                            <input
+                                id="join-nickname"
+                                type="text"
+                                name="nickname"
+                                maxlength="24"
+                                placeholder="What should we call you?"
+                                autocomplete="nickname"
+                                required
+                            >
+                            <label for="room-code">Room code</label>
+                            <input
+                                id="room-code"
+                                class="room-code-input"
+                                type="text"
+                                name="code"
+                                maxlength="6"
+                                placeholder="ABC123"
+                                autocomplete="off"
+                                required
+                            >
+                            <button class="button button-purple" type="submit">
+                                Join room <span aria-hidden="true">→</span>
+                            </button>
+                        </form>
+                    </section>
+
+                    <section class="lobby-card lobby-card-rejoin">
+                        <div class="card-heading">
+                            <span class="card-icon">↩</span>
+                            <div>
+                                <p class="eyebrow">BACK IN THE GAME</p>
+                                <h2>Rejoin your seat</h2>
+                            </div>
+                        </div>
+                        <p class="lobby-description">
+                            Enter the same room code and nickname you used before. Your seat will be waiting.
+                        </p>
+                        <form method="POST" action="{% url 'games:join_room' %}" class="stack-form">
+                            {% csrf_token %}
+                            <label for="rejoin-nickname">Your seat name</label>
+                            <input
+                                id="rejoin-nickname"
+                                type="text"
+                                name="nickname"
+                                maxlength="24"
+                                placeholder="Your original nickname"
+                                autocomplete="nickname"
+                                required
+                            >
+                            <label for="rejoin-room-code">Room code</label>
+                            <input
+                                id="rejoin-room-code"
+                                class="room-code-input"
+                                type="text"
+                                name="code"
+                                maxlength="6"
+                                placeholder="ABC123"
+                                autocomplete="off"
+                                required
+                            >
+                            <button class="button button-pink" type="submit">
+                                Rejoin game <span aria-hidden="true">↗</span>
+                            </button>
+                        </form>
+                    </section>
+                </div>
+            </div>
+
+            <footer class="chat-footer">
+                <span>🎮</span> GOOD FRIENDS. BAD DECISIONS. GREAT STORIES.
+            </footer>
+        </section>
+    </main>
+    <p class="install-help" data-install-help hidden>
+        Open your browser menu and choose Install app or Add to Home Screen.
+    </p>
+    <script src="{% static 'games/pwa.js' %}" defer></script>
+</body>
+</html>

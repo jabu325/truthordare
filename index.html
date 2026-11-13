@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Truth & Dare | Session Desk</title>
+  <style>
+    :root {
+      --ink: #27152f;
+      --muted: #8b7795;
+      --line: #eadff0;
+      --panel: #ffffff;
+      --plum: #5f236f;
+      --purple: #8f4bb5;
+      --pink: #f05f9b;
+      --pink-soft: #fff0f7;
+      --lavender: #f6effb;
+      --shadow: 0 24px 70px rgba(82, 35, 98, .14);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: Georgia, "Times New Roman", serif;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(255, 179, 215, .55), transparent 25%),
+        radial-gradient(circle at 93% 4%, rgba(186, 154, 255, .48), transparent 28%),
+        #fbf8fc;
+    }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .app-shell { min-height: 100vh; padding: 28px; }
+    .topbar {
+      max-width: 1440px; margin: 0 auto 22px; display: flex;
+      align-items: center; justify-content: space-between; gap: 20px;
+    }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand-mark {
+      display: grid; place-items: center; width: 46px; height: 46px;
+      border-radius: 15px; color: #fff; font-family: Arial, sans-serif; font-size: 22px;
+      background: linear-gradient(145deg, var(--pink), var(--purple));
+      box-shadow: 0 10px 22px rgba(214, 74, 142, .28);
+    }
+    .brand h1 { margin: 0; font-size: 21px; letter-spacing: .3px; }
+    .brand p { margin: 3px 0 0; color: var(--muted); font: 12px Arial, sans-serif; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .button {
+      border: 1px solid var(--line); border-radius: 11px; padding: 11px 15px;
+      color: var(--plum); background: rgba(255,255,255,.8); font: 700 12px Arial, sans-serif;
+    }
+    .button:hover { border-color: var(--pink); color: #b12e6e; }
+    .button.primary { border-color: transparent; color: #fff; background: var(--plum); }
+    .button.primary:hover { background: #742c86; }
+    .login-screen { min-height: calc(100vh - 56px); display: grid; place-items: center; }
+    .login-card { width: min(420px, 100%); padding: 34px; border: 1px solid rgba(217, 196, 225, .8); border-radius: 24px; background: rgba(255,255,255,.92); box-shadow: var(--shadow); }
+    .login-card h2 { margin: 0; font-size: 28px; }
+    .login-card p { margin: 8px 0 24px; color: var(--muted); font: 12px/1.5 Arial, sans-serif; }
+    .login-card label { display: block; margin: 14px 0 6px; color: var(--plum); font: 700 10px Arial, sans-serif; letter-spacing: .7px; text-transform: uppercase; }
+    .login-card input { width: 100%; padding: 13px; border: 1px solid var(--line); border-radius: 10px; outline: none; font: 14px Arial, sans-serif; }
+    .login-card input:focus { border-color: var(--pink); box-shadow: 0 0 0 3px var(--pink-soft); }
+    .login-card .button { width: 100%; margin-top: 18px; }
+    .login-error { min-height: 17px; margin-top: 12px; color: #b72f69; font: 11px Arial, sans-serif; }
+    .hidden { display: none !important; }
+    .workspace {
+      max-width: 1440px; min-height: calc(100vh - 118px); margin: 0 auto;
+      display: grid; grid-template-columns: 310px minmax(0, 1fr); overflow: hidden;
+      border: 1px solid rgba(217, 196, 225, .8); border-radius: 24px; background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .sidebar { padding: 24px 18px; background: linear-gradient(180deg, #fff9fd, #faf5fd); border-right: 1px solid var(--line); }
+    .side-heading { display: flex; align-items: end; justify-content: space-between; margin: 0 7px 15px; }
+    .side-heading h2 { margin: 0; font-size: 19px; }
+    .count { color: var(--pink); font: 700 11px Arial, sans-serif; }
+    .search { width: 100%; margin-bottom: 14px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; outline: none; color: var(--ink); background: #fff; font: 13px Arial, sans-serif; }
+    .search:focus { border-color: var(--pink); box-shadow: 0 0 0 3px var(--pink-soft); }
+    .filters { display: grid; gap: 8px; margin-bottom: 15px; }
+    .filter-label { color: var(--muted); font: 700 9px Arial, sans-serif; letter-spacing: .7px; text-transform: uppercase; }
+    .filter-select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--plum); background: #fff; outline: none; font: 12px Arial, sans-serif; }
+    .filter-select:focus { border-color: var(--pink); box-shadow: 0 0 0 3px var(--pink-soft); }
+    .session-list { display: grid; gap: 8px; }
+    .session-item { width: 100%; padding: 13px; text-align: left; border: 1px solid transparent; border-radius: 13px; color: var(--ink); background: transparent; }
+    .session-item:hover { background: #fff; border-color: var(--line); }
+    .session-item.active { border-color: #e9cce9; background: linear-gradient(135deg, #fff, #fff0f8); box-shadow: 0 8px 20px rgba(156, 76, 163, .08); }
+    .session-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .session-code { font: 700 12px Arial, sans-serif; letter-spacing: .7px; color: var(--plum); }
+    .session-state { padding: 4px 7px; border-radius: 999px; color: #8b2861; background: #ffe5f1; font: 700 9px Arial, sans-serif; text-transform: uppercase; }
+    .session-people, .session-date { margin-top: 8px; color: var(--muted); font: 11px Arial, sans-serif; }
+    .session-date { margin-top: 5px; }
+    .empty { padding: 30px 14px; color: var(--muted); text-align: center; font: 13px Arial, sans-serif; }
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .session-header { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 24px 30px; border-bottom: 1px solid var(--line); }
+    .session-title h2 { margin: 0; font-size: 25px; }
+    .session-title p { margin: 7px 0 0; color: var(--muted); font: 12px Arial, sans-serif; }
+    .session-meta { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
+    .tag { padding: 7px 10px; border-radius: 999px; color: var(--plum); background: var(--lavender); font: 700 10px Arial, sans-serif; }
+    .tag.hot { color: #a33069; background: var(--pink-soft); }
+    .chat-wrap { flex: 1; overflow: auto; padding: 27px clamp(18px, 5vw, 72px) 38px; background: linear-gradient(180deg, #fff, #fffaff 72%, #fbf5fe); }
+    .chat-intro { max-width: 720px; margin: 0 auto 26px; text-align: center; }
+    .chat-intro span { display: inline-block; padding: 6px 11px; border-radius: 999px; color: #a13770; background: var(--pink-soft); font: 700 10px Arial, sans-serif; letter-spacing: .5px; text-transform: uppercase; }
+    .chat-intro p { margin: 10px 0 0; color: var(--muted); font: 12px Arial, sans-serif; }
+    .round { max-width: 860px; margin: 0 auto 28px; }
+    .round-label { display: flex; align-items: center; gap: 10px; margin: 0 0 13px; color: var(--muted); font: 700 10px Arial, sans-serif; letter-spacing: 1px; text-transform: uppercase; }
+    .round-label::before, .round-label::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+    .message-line { display: flex; gap: 11px; align-items: flex-end; margin: 10px 0; }
+    .message-line.right { flex-direction: row-reverse; }
+    .avatar { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 12px; color: #fff; background: linear-gradient(145deg, #bf70d4, #70409b); font: 700 12px Arial, sans-serif; }
+    .message-line.right .avatar { background: linear-gradient(145deg, #ff8ab8, #d74683); }
+    .bubble { max-width: min(650px, 78%); padding: 13px 16px; border: 1px solid #eadcf0; border-radius: 17px 17px 17px 5px; background: #fff; box-shadow: 0 7px 20px rgba(86, 33, 100, .06); }
+    .message-line.right .bubble { border-color: #f2cadd; border-radius: 17px 17px 5px 17px; background: linear-gradient(145deg, #fff0f7, #fff8fb); }
+    .message-author { margin-bottom: 6px; color: var(--plum); font: 700 11px Arial, sans-serif; }
+    .message-author small { color: var(--muted); font-weight: 400; }
+    .bubble p { margin: 0; line-height: 1.5; font-size: 16px; }
+    .message-detail { margin-top: 9px; color: var(--muted); font: 10px Arial, sans-serif; }
+    .prompt-badge { display: inline-block; margin-bottom: 8px; padding: 4px 7px; border-radius: 5px; color: #803d98; background: #f1e5f7; font: 700 9px Arial, sans-serif; letter-spacing: .5px; text-transform: uppercase; }
+    .photo-answer { display: grid; gap: 9px; }
+    .photo-answer img, .photo-answer video { display: block; width: min(330px, 100%); max-height: 250px; object-fit: cover; border-radius: 12px; border: 1px solid #efcade; background: #24132c; }
+    .photo-note { color: #a3356f; font: 700 11px Arial, sans-serif; }
+    .no-photo { padding: 18px; border: 1px dashed #ddb9dd; border-radius: 11px; color: var(--muted); background: rgba(255,255,255,.7); font: 12px Arial, sans-serif; }
+    .side-panel { width: 250px; padding: 22px; border-left: 1px solid var(--line); background: #fff; }
+    .side-panel h3 { margin: 0 0 15px; font-size: 17px; }
+    .profile { display: flex; align-items: center; gap: 9px; margin: 12px 0; }
+    .profile .avatar { width: 30px; height: 30px; border-radius: 10px; font-size: 10px; }
+    .profile strong { display: block; font: 700 12px Arial, sans-serif; }
+    .profile span { display: block; margin-top: 3px; color: var(--muted); font: 10px Arial, sans-serif; }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 22px; }
+    .stat { padding: 12px; border-radius: 12px; background: var(--lavender); }
+    .stat strong { display: block; color: var(--plum); font-size: 21px; }
+    .stat span { display: block; margin-top: 4px; color: var(--muted); font: 10px Arial, sans-serif; }
+    .import-help { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font: 11px/1.5 Arial, sans-serif; }
+    .mobile-only { display: none; }
+    @media (max-width: 1080px) { .workspace { grid-template-columns: 270px minmax(0, 1fr); } .side-panel { display: none; } }
+    @media (max-width: 720px) {
+      .app-shell { padding: 14px; } .topbar { align-items: flex-start; } .top-actions .button:first-child { display: none; }
+      .workspace { display: block; border-radius: 18px; } .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .session-list { display: flex; overflow-x: auto; padding-bottom: 3px; } .session-item { min-width: 210px; }
+      .session-header { align-items: flex-start; flex-direction: column; padding: 20px; } .session-meta { justify-content: start; }
+      .chat-wrap { padding: 22px 13px 30px; } .bubble { max-width: 85%; } .bubble p { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="login-screen" id="loginScreen">
+    <form class="login-card" id="loginForm">
+      <div class="brand-mark">✦</div>
+      <h2>Welcome back</h2>
+      <p>Sign in to view private Truth & Dare session transcripts and media.</p>
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button class="button primary" type="submit">Enter Session Desk</button>
+      <div class="login-error" id="loginError"></div>
+    </form>
+  </section>
+  <div class="app-shell hidden">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">✦</div>
+        <div><h1>Session Desk</h1><p>Truth & Dare admin panel</p></div>
+      </div>
+      <div class="top-actions">
+        <button class="button primary" id="refresh">Refresh live data</button>
+        <button class="button" id="logout">Log out</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar">
+        <div class="side-heading"><h2>Sessions</h2><span class="count" id="sessionCount">0 total</span></div>
+        <input class="search" id="search" type="search" placeholder="Search code or player...">
+        <div class="filters">
+          <label class="filter-label" for="mediaFilter">Media</label>
+          <select class="filter-select" id="mediaFilter"><option value="all">All sessions</option><option value="media">Has images or videos</option><option value="photo">Photos</option><option value="video">Videos / animations</option><option value="text">Text only</option></select>
+          <label class="filter-label" for="roundFilter">Rounds</label>
+          <select class="filter-select" id="roundFilter"><option value="all">Any round count</option><option value="none">No rounds</option><option value="short">1–3 rounds</option><option value="long">4+ rounds</option></select>
+          <label class="filter-label" for="categoryFilter">Category</label>
+          <select class="filter-select" id="categoryFilter"><option value="all">All categories</option><option value="truth">Truth</option><option value="dare">Dare</option></select>
+          <label class="filter-label" for="typeFilter">Type</label>
+          <select class="filter-select" id="typeFilter"><option value="all">All types</option></select>
+          <label class="filter-label" for="difficultyFilter">Difficulty</label>
+          <select class="filter-select" id="difficultyFilter"><option value="all">All difficulties</option></select>
+        </div>
+        <div class="session-list" id="sessionList"></div>
+      </aside>
+
+      <section class="main">
+        <div class="session-header" id="sessionHeader"></div>
+        <div class="chat-wrap" id="chat"></div>
+      </section>
+
+      <aside class="side-panel" id="peoplePanel"></aside>
+    </main>
+  </div>
+
+  <script>
+    let data = { sessions: [] };
+    let selectedCode = "";
+    let liveError = "";
+    const $ = (selector) => document.querySelector(selector);
+    const initials = (name) => (name || "?").split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
+    const text = (value) => value == null ? "" : String(value);
+    const escapeHtml = (value) => text(value).replace(/[&<>\"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
+
+    function setAuthenticated(authenticated) {
+      $("#loginScreen").classList.toggle("hidden", authenticated);
+      $(".app-shell").classList.toggle("hidden", !authenticated);
+    }
+
+    function normalize(input) {
+      const sessions = Array.isArray(input) ? input : (input.sessions || []);
+      return { sessions: sessions.map(session => ({
+        code: session.code || session.game_code || "UNKNOWN",
+        status: session.status || session.state || "ended",
+        gameType: session.gameType || session.game_type || "truth or dare",
+        difficulty: session.difficulty || "standard",
+        createdAt: session.createdAt || session.created_at || "",
+        players: session.players || [],
+        rounds: session.rounds || session.history || session.messages || []
+      })) };
+    }
+
+    function roundToView(round) {
+      const isPhoto = round.answerType === "photo" || round.answer_type === "photo" || round.answer_file_id || round.imageUrl || round.image_url;
+      return {
+        type: round.type || round.prompt_type || "question",
+        prompt: round.prompt || round.prompt_text || "",
+        selectedBy: round.selectedBy || round.selected_by_name || "Unknown player",
+        selectedById: round.selectedById || round.selected_by || "?",
+        challenged: round.challenged || round.challenged_player_name || "Unknown player",
+        challengedId: round.challengedId || round.challenged_player || "?",
+        answerer: round.answerer || round.answerer_name || "",
+        answererId: round.answererId || round.answerer_id || "",
+        answer: round.answer || round.answer_text || "",
+        answerType: isPhoto ? "photo" : (round.answerType || round.answer_type || (round.answer ? "text" : "pending")),
+        mediaKind: round.mediaKind || round.answer_media_kind || (isPhoto ? "photo" : ""),
+        imageUrl: round.imageUrl || round.image_url || round.mediaUrl || round.media_url || "",
+        caption: round.caption || round.answer_caption || "",
+        createdAt: round.createdAt || round.created_at || "",
+        answeredAt: round.answeredAt || round.answered_at || ""
+      };
+    }
+
+    function currentSession() { return data.sessions.find(session => session.code === selectedCode) || data.sessions[0]; }
+    function playerFor(session, name, id) { return (session.players || []).find(player => text(player.id) === text(id) || player.name === name) || { name, id }; }
+
+    function populateFilterOptions() {
+      const types = [...new Set(data.sessions.map(session => session.gameType).filter(Boolean))].sort();
+      const difficulties = [...new Set(data.sessions.map(session => session.difficulty).filter(Boolean))].sort();
+      const typeSelect = $("#typeFilter");
+      const difficultySelect = $("#difficultyFilter");
+      const currentType = typeSelect.value;
+      const currentDifficulty = difficultySelect.value;
+      typeSelect.innerHTML = `<option value="all">All types</option>` + types.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
+      difficultySelect.innerHTML = `<option value="all">All difficulties</option>` + difficulties.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
+      typeSelect.value = types.includes(currentType) ? currentType : "all";
+      difficultySelect.value = difficulties.includes(currentDifficulty) ? currentDifficulty : "all";
+    }
+
+    function matchesFilters(session) {
+      const rounds = session.rounds.map(roundToView);
+      const mediaFilter = $("#mediaFilter").value;
+      const roundFilter = $("#roundFilter").value;
+      const category = $("#categoryFilter").value;
+      const type = $("#typeFilter").value;
+      const difficulty = $("#difficultyFilter").value;
+      const mediaRounds = rounds.filter(round => round.answerType !== "text" && round.answerType !== "pending");
+      const categoryMatch = category === "all" || rounds.some(round => round.type.toLowerCase() === category);
+      const mediaMatch = mediaFilter === "all"
+        || (mediaFilter === "media" && mediaRounds.length)
+        || (mediaFilter === "photo" && rounds.some(round => ["photo", "image_document"].includes(round.mediaKind)))
+        || (mediaFilter === "video" && rounds.some(round => ["video", "video_document", "animation"].includes(round.mediaKind)))
+        || (mediaFilter === "text" && rounds.length > 0 && mediaRounds.length === 0);
+      const roundsMatch = roundFilter === "all"
+        || (roundFilter === "none" && rounds.length === 0)
+        || (roundFilter === "short" && rounds.length >= 1 && rounds.length <= 3)
+        || (roundFilter === "long" && rounds.length >= 4);
+      return mediaMatch && roundsMatch && categoryMatch
+        && (type === "all" || session.gameType === type)
+        && (difficulty === "all" || session.difficulty === difficulty);
+    }
+
+    function renderSessions() {
+      const query = text($("#search").value).toLowerCase();
+      const sessions = data.sessions.filter(session => (`${session.code} ${session.players.map(player => player.name).join(" ")}`).toLowerCase().includes(query) && matchesFilters(session));
+      if (sessions.length && !sessions.some(session => session.code === selectedCode)) {
+        selectedCode = sessions[0].code;
+      }
+      $("#sessionCount").textContent = `${data.sessions.length} total`;
+      $("#sessionList").innerHTML = sessions.length ? sessions.map(session => `
+        <button class="session-item ${session.code === selectedCode ? "active" : ""}" data-code="${escapeHtml(session.code)}">
+          <div class="session-row"><span class="session-code">${escapeHtml(session.code)}</span><span class="session-state">${escapeHtml(session.status)}</span></div>
+          <div class="session-people">${escapeHtml((session.players || []).map(player => player.name).join("  ×  ") || "Players not named")}</div>
+          <div class="session-date">${escapeHtml(session.createdAt || "No timestamp")}</div>
+        </button>`).join("") : `<div class="empty">No sessions match that search.</div>`;
+      document.querySelectorAll(".session-item").forEach(item => item.addEventListener("click", () => { selectedCode = item.dataset.code; render(); }));
+    }
+
+    function renderHeader(session) {
+      $("#sessionHeader").innerHTML = session ? `
+        <div class="session-title"><h2>${escapeHtml(session.code)}</h2><p>${escapeHtml(session.createdAt || "Session timeline")}</p></div>
+        <div class="session-meta"><span class="tag hot">${escapeHtml(session.status)}</span><span class="tag">${escapeHtml(session.gameType)}</span><span class="tag">${escapeHtml(session.difficulty)}</span><span class="tag">${session.rounds.length} rounds</span></div>` : `<div class="empty">${escapeHtml(liveError || "No sessions found in truth_or_dare.db.")}</div>`;
+    }
+
+    function renderChat(session) {
+      if (!session) { $("#chat").innerHTML = ""; return; }
+      const rounds = session.rounds.map(roundToView);
+      $("#chat").innerHTML = `<div class="chat-intro"><span>Live session transcript</span><p>Questions, answers, identities, and media in the order they happened.</p></div>` + rounds.map((round, index) => {
+        const chooser = playerFor(session, round.selectedBy, round.selectedById);
+        const challenged = playerFor(session, round.challenged, round.challengedId);
+        const answerer = playerFor(session, round.answerer, round.answererId);
+        const media = round.answerType !== "text" && round.answerType !== "pending";
+        const videoMedia = ["video", "video_document"].includes(round.mediaKind) || (round.mediaKind === "animation" && /\.(mp4|webm)$/i.test(round.imageUrl));
+        const mediaBody = round.imageUrl ? (videoMedia ? `<div class="photo-answer"><video controls preload="metadata" src="${escapeHtml(round.imageUrl)}"></video>${round.caption ? `<span class="photo-note">${escapeHtml(round.caption)}</span>` : ""}</div>` : `<div class="photo-answer"><img src="${escapeHtml(round.imageUrl)}" alt="${escapeHtml(round.mediaKind || "Media")} answer from ${escapeHtml(answerer.name)}">${round.caption ? `<span class="photo-note">${escapeHtml(round.caption)}</span>` : ""}</div>`) : `<div class="no-photo">${escapeHtml(round.mediaKind || "Media")} answer recorded, but no browser media URL is available.</div>`;
+        const answerBody = media ? mediaBody : (round.answer ? `<p>${escapeHtml(round.answer)}</p>` : `<p class="message-detail">Waiting for an answer...</p>`);
+        return `<article class="round">
+          <div class="round-label">Round ${index + 1} · ${escapeHtml(round.type)}</div>
+          <div class="message-line"><div class="avatar">${initials(chooser.name)}</div><div class="bubble"><div class="message-author">${escapeHtml(chooser.name)} <small>(${escapeHtml(chooser.id)}) · chose the question</small></div><span class="prompt-badge">${escapeHtml(round.type)}</span><p>${escapeHtml(round.prompt)}</p><div class="message-detail">For ${escapeHtml(challenged.name)} (${escapeHtml(challenged.id)}) · ${escapeHtml(round.createdAt)}</div></div></div>
+          <div class="message-line right"><div class="avatar">${initials(answerer.name || challenged.name)}</div><div class="bubble"><div class="message-author">${escapeHtml(answerer.name || challenged.name)} <small>(${escapeHtml(answerer.id || challenged.id)}) · answer</small></div>${answerBody}<div class="message-detail">${round.answeredAt ? `Answered ${escapeHtml(round.answeredAt)}` : "Not answered yet"}</div></div></div>
+        </article>`;
+      }).join("");
+    }
+
+    function renderPeople(session) {
+      if (!session) { $("#peoplePanel").innerHTML = ""; return; }
+      const mediaCount = session.rounds.map(roundToView).filter(round => round.answerType !== "text" && round.answerType !== "pending").length;
+      $("#peoplePanel").innerHTML = `<h3>In this session</h3>${(session.players || []).map(player => `<div class="profile"><div class="avatar">${initials(player.name)}</div><div><strong>${escapeHtml(player.name)}</strong><span>${escapeHtml(player.username || "Telegram ID: " + player.id)}</span></div></div>`).join("")}<div class="stat-grid"><div class="stat"><strong>${session.rounds.length}</strong><span>rounds</span></div><div class="stat"><strong>${mediaCount}</strong><span>media answers</span></div></div><div class="import-help">Live data is read from <b>truth_or_dare.db</b>. Telegram media is resolved by the local admin server.</div>`;
+    }
+
+    function render() { populateFilterOptions(); renderSessions(); const session = currentSession(); renderHeader(session); renderChat(session); renderPeople(session); }
+    $("#search").addEventListener("input", render);
+    ["mediaFilter", "roundFilter", "categoryFilter", "typeFilter", "difficultyFilter"].forEach(id => $("#" + id).addEventListener("change", render));
+    async function loadLiveData() {
+      liveError = "";
+      try {
+        const response = await fetch("/api/sessions", { cache: "no-store" });
+        if (!response.ok) throw new Error(`Admin server returned ${response.status}`);
+        data = normalize(await response.json());
+        if (!data.sessions.some(session => session.code === selectedCode)) selectedCode = data.sessions[0]?.code || "";
+      } catch (error) {
+        data = { sessions: [] };
+        selectedCode = "";
+        liveError = `Unable to load live sessions: ${error.message}`;
+      }
+      render();
+    }
+    $("#loginForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      $("#loginError").textContent = "";
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: $("#username").value, password: $("#password").value })
+      });
+      if (!response.ok) {
+        $("#loginError").textContent = "Invalid username or password.";
+        return;
+      }
+      $("#loginForm").reset();
+      setAuthenticated(true);
+      loadLiveData();
+    });
+    $("#logout").addEventListener("click", async () => {
+      await fetch("/api/logout", { method: "POST" });
+      setAuthenticated(false);
+      data = { sessions: [] };
+      render();
+    });
+    $("#refresh").addEventListener("click", loadLiveData);
+    fetch("/api/auth").then(response => response.json()).then(result => {
+      setAuthenticated(result.authenticated);
+      if (result.authenticated) loadLiveData();
+    }).catch(() => setAuthenticated(false));
+  </script>
+</body>
+</html>

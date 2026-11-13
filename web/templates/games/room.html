@@ -1,0 +1,312 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#10090e">
+    <meta name="description" content="Play a round of Truth or Dare with a friend.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="{% static 'games/manifest.webmanifest' %}">
+    <link rel="icon" href="{% static 'games/icons/icon-192.png' %}" type="image/png">
+    <link rel="apple-touch-icon" href="{% static 'games/icons/icon-192.png' %}">
+    <title>Room {{ room.code }} · Truth or Dare</title>
+    <link rel="stylesheet" href="{% static 'games/style.css' %}">
+    {% if should_refresh %}
+        <meta http-equiv="refresh" content="4">
+    {% endif %}
+</head>
+
+<body>
+    <main class="page-shell room-shell">
+        <header class="room-heading">
+            <a class="brand-mini" href="{% url 'games:home' %}" aria-label="Truth or Dare home">
+                <img class="brand-logo" src="{% static 'games/icons/truth-or-dare-logo.jpg' %}" alt="">
+            </a>
+            <div class="room-heading-copy">
+                <p class="eyebrow">THE FRIENDSHIP ARCADE</p>
+                <h1>Game in progress</h1>
+            </div>
+            <div class="room-code-badge">
+                <span>ROOM CODE</span>
+                <strong>{{ room.code }}</strong>
+            </div>
+            <button class="install-app-button room-install-button" type="button" data-install-app hidden>
+                Install app
+            </button>
+        </header>
+
+        <section class="chat-panel game-chat" aria-label="Game chat">
+            <div class="chat-topbar">
+                <span class="live-dot"></span>
+                <span>ROOM {{ room.code }}</span>
+                <span class="topbar-status">{{ room.get_status_display|upper }}</span>
+            </div>
+
+            <div class="player-strip">
+                {% for member in players %}
+                    <div class="player-chip {% if member.id == room.current_turn_id %}player-active{% endif %}" data-player-id="{{ member.id }}">
+                        <span class="player-avatar {% if member.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ member.nickname|first|upper }}</span>
+                        <span>{{ member.nickname }}</span>
+                        <span class="presence-label">
+                            <span class="presence-dot {% if member.is_active %}presence-online{% else %}presence-offline{% endif %}" aria-hidden="true"></span>
+                            <span data-presence-label>{% if member.is_active %}Active{% else %}Inactive{% endif %}</span>
+                        </span>
+                        {% if member.id == room.current_turn_id %}
+                            <span class="turn-tag">UP NOW</span>
+                        {% endif %}
+                        {% if member.is_host %}
+                            <span class="host-tag">HOST</span>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+                {% if room.phase == "WAITING" %}
+                    <div class="player-chip player-waiting">
+                        <span class="player-avatar">?</span>
+                        <span>Waiting for player 2</span>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="chat-feed game-feed">
+                <div class="message-row">
+                    <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                    <div class="message-stack">
+                        <span class="message-author">THE GAME MASTER</span>
+                        <div class="bubble bubble-system">
+                            Welcome to room <strong>{{ room.code }}</strong>, {{ player.nickname }}.
+                            {% if room.phase == "WAITING" %}
+                                Send the room code to your friend so they can jump in.
+                            {% elif room.phase == "CHOOSING_CATEGORY" %}
+                                Both players are here. Host, pick your game vibe!
+                            {% elif room.phase == "CHOOSING_DIFFICULTY" %}
+                                <span class="bubble-break">Vibe locked: {{ room.category_label }}. Now choose a difficulty.</span>
+                            {% elif room.phase == "CHOOSING_TYPE" %}
+                                <span class="bubble-break">{{ room.category_label }} · {{ room.get_difficulty_display }} mode. Let’s see who’s up.</span>
+                            {% elif room.phase == "CHOOSING_PROMPT" %}
+                                <span class="bubble-break">A challenge is on the way. Pick the perfect one.</span>
+                            {% elif room.phase == "AWAITING_ANSWER" %}
+                                <span class="bubble-break">Challenge accepted? Your moment is now.</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% if messages %}
+                    <div class="notice-list" role="status">
+                        {% for message in messages %}
+                            <p class="notice">{{ message }}</p>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                {% if room.phase == "WAITING" %}
+                    <div class="message-row {% if player.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                        <div class="message-stack">
+                            <span class="message-author">YOUR INVITE</span>
+                            <div class="bubble {% if player.is_host %}bubble-host{% else %}bubble-guest{% endif %} invite-bubble">
+                                Share this code with your friend:
+                                <strong class="invite-code">{{ room.code }}</strong>
+                            </div>
+                        </div>
+                        <div class="avatar avatar-player {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</div>
+                    </div>
+
+                {% elif room.phase == "CHOOSING_CATEGORY" %}
+                    {% if player.is_host %}
+                    <div class="message-row speaker-host">
+                        <div class="message-stack">
+                            <span class="message-author">GAME SETUP</span>
+                            <div class="bubble bubble-host">Pick the kind of game you want to play.</div>
+                            <form method="POST" action="{% url 'games:configure_category' room.code %}" class="choice-grid">
+                                {% csrf_token %}
+                                {% for value, label in room.GAME_CATEGORIES %}
+                                    <button class="choice-button" type="submit" name="game_type" value="{{ value }}">
+                                        <span class="choice-spark">✦</span>{{ label }}<span aria-hidden="true">↗</span>
+                                    </button>
+                                {% endfor %}
+                            </form>
+                        </div>
+                        <div class="avatar avatar-player avatar-host">{{ player.nickname|first|upper }}</div>
+                    </div>
+                    {% else %}
+                    <div class="message-row">
+                        <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                        <div class="message-stack">
+                            <span class="message-author">THE GAME MASTER</span>
+                            <div class="bubble bubble-system">Waiting for the host to choose a game category...</div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                {% elif room.phase == "CHOOSING_DIFFICULTY" %}
+                    {% if player.is_host %}
+                    <div class="message-row speaker-host">
+                        <div class="message-stack">
+                            <span class="message-author">GAME SETUP · {{ room.category_label|upper }}</span>
+                            <div class="bubble bubble-host">How spicy are we making this?</div>
+                            <form method="POST" action="{% url 'games:configure_difficulty' room.code %}" class="choice-grid choice-grid-compact">
+                                {% csrf_token %}
+                                <button class="choice-button" type="submit" name="difficulty" value="easy">🌱 Easy</button>
+                                <button class="choice-button" type="submit" name="difficulty" value="hard">⚡ Hard</button>
+                                {% if room.game_type == "best_friends" or room.game_type == "couples" %}
+                                    <button class="choice-button" type="submit" name="difficulty" value="spicy">🌶 Spicy</button>
+                                {% endif %}
+                            </form>
+                        </div>
+                        <div class="avatar avatar-player avatar-host">{{ player.nickname|first|upper }}</div>
+                    </div>
+                    {% else %}
+                    <div class="message-row">
+                        <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                        <div class="message-stack">
+                            <span class="message-author">THE GAME MASTER</span>
+                            <div class="bubble bubble-system">The host is setting the difficulty. Brace yourself.</div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                {% elif room.phase == "CHOOSING_TYPE" %}
+                    {% if room.current_turn_id == player.id %}
+                        <div class="message-row {% if player.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                            <div class="message-stack">
+                                <span class="message-author">YOUR TURN · PICK ONE</span>
+                                <div class="bubble {% if player.is_host %}bubble-host{% else %}bubble-guest{% endif %}">Truth or dare? Choose your destiny.</div>
+                                <form method="POST" action="{% url 'games:choose_type' room.code %}" class="choice-grid choice-grid-compact">
+                                    {% csrf_token %}
+                                    <button class="choice-button choice-truth" type="submit" name="prompt_type" value="truth">💬 Truth</button>
+                                    <button class="choice-button choice-dare" type="submit" name="prompt_type" value="dare">🔥 Dare</button>
+                                </form>
+                            </div>
+                            <div class="avatar avatar-player {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</div>
+                        </div>
+                    {% else %}
+                        <div class="message-row">
+                            <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                            <div class="message-stack">
+                                <span class="message-author">THE GAME MASTER</span>
+                                <div class="bubble bubble-system">Waiting for {{ room.current_turn.nickname }} to choose Truth or Dare...</div>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                {% elif room.phase == "CHOOSING_PROMPT" %}
+                    {% if room.current_turn_id == player.id %}
+                        <div class="message-row">
+                            <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                            <div class="message-stack">
+                                <span class="message-author">THE GAME MASTER</span>
+                                <div class="bubble bubble-system">Waiting for {{ opponent.nickname }} to choose a prompt for you...</div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="message-row {% if player.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                            <div class="message-stack">
+                                <span class="message-author">CHOOSE A PROMPT FOR {{ room.current_turn.nickname|upper }}</span>
+                                <div class="bubble {% if player.is_host %}bubble-host{% else %}bubble-guest{% endif %}">Pick one. Make it count.</div>
+                                <form method="POST" action="{% url 'games:choose_prompt' room.code %}" class="choice-grid prompt-choices">
+                                    {% csrf_token %}
+                                    {% for prompt in prompt_options %}
+                                        <button class="choice-button prompt-button" type="submit" name="prompt_id" value="{{ prompt.id }}">
+                                            <span class="choice-spark">✦</span>{{ prompt.text }}
+                                        </button>
+                                    {% empty %}
+                                        <div class="bubble bubble-system">No prompts are available. Refresh or ask the host to restart.</div>
+                                    {% endfor %}
+                                </form>
+                            </div>
+                            <div class="avatar avatar-player {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</div>
+                        </div>
+                    {% endif %}
+
+                {% elif room.phase == "AWAITING_ANSWER" %}
+                    {% if room.current_turn_id == player.id %}
+                        <div class="message-row {% if current_round.selected_by.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                            <div class="avatar avatar-player {% if current_round.selected_by.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ current_round.selected_by.nickname|first|upper }}</div>
+                            <div class="message-stack">
+                                <span class="message-author">{{ current_round.selected_by.nickname|upper }} · {{ current_round.get_prompt_type_display|upper }}</span>
+                                <div class="bubble {% if current_round.selected_by.is_host %}bubble-host{% else %}bubble-guest{% endif %} challenge-bubble">{{ current_round.prompt_text }}</div>
+                            </div>
+                        </div>
+                        <div class="message-row {% if player.is_host %}speaker-host{% else %}speaker-guest{% endif %} answer-row">
+                            <div class="message-stack">
+                                <span class="message-author">YOUR REPLY</span>
+                                <form method="POST" action="{% url 'games:submit_answer' room.code %}" class="answer-form">
+                                    {% csrf_token %}
+                                    <label class="sr-only" for="answer">Your answer</label>
+                                    <textarea id="answer" name="answer" maxlength="5000" placeholder="Type your answer..." required></textarea>
+                                    <button class="button button-pink" type="submit">Send answer <span aria-hidden="true">↑</span></button>
+                                </form>
+                            </div>
+                            <div class="avatar avatar-player {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</div>
+                        </div>
+                    {% else %}
+                        <div class="message-row {% if current_round.selected_by.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                            <div class="avatar avatar-player {% if current_round.selected_by.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ current_round.selected_by.nickname|first|upper }}</div>
+                            <div class="message-stack">
+                                <span class="message-author">{{ current_round.selected_by.nickname|upper }} · {{ current_round.get_prompt_type_display|upper }}</span>
+                                <div class="bubble {% if current_round.selected_by.is_host %}bubble-host{% else %}bubble-guest{% endif %} challenge-bubble">{{ current_round.prompt_text }}</div>
+                                <span class="message-time">WAITING FOR {{ room.current_turn.nickname|upper }} TO ANSWER...</span>
+                            </div>
+                        </div>
+                    {% endif %}
+                {% endif %}
+
+                {% if rounds %}
+                    <section class="history-section" aria-label="Round history">
+                        <div class="history-heading">
+                            <span class="history-line"></span>
+                            <h2>CHAT REPLAY <span>· {{ rounds|length }} ROUND{{ rounds|length|pluralize }}</span></h2>
+                            <span class="history-line"></span>
+                        </div>
+                        <ol class="history-list">
+                            {% for round in rounds %}
+                                <li class="history-entry">
+                                    <span class="history-round">ROUND {{ round.round_number }} · {{ round.get_prompt_type_display|upper }}</span>
+                                    <div class="history-message-row {% if round.selected_by.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                                        <div class="avatar avatar-player {% if round.selected_by.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ round.selected_by.nickname|first|upper }}</div>
+                                        <div class="bubble {% if round.selected_by.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-prompt">
+                                            <strong>{{ round.selected_by.nickname }}</strong> picked for {{ round.challenged_player.nickname }}:
+                                            <span class="bubble-break">{{ round.prompt_text }}</span>
+                                        </div>
+                                    </div>
+                                    {% if round.answer_type == "pending" %}
+                                        <div class="history-message-row">
+                                            <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                                            <div class="bubble bubble-system">Waiting for {{ round.challenged_player.nickname }} to answer...</div>
+                                        </div>
+                                    {% else %}
+                                        <div class="history-message-row {% if round.challenged_player.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                                            <div class="avatar avatar-player {% if round.challenged_player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ round.challenged_player.nickname|first|upper }}</div>
+                                            <div class="bubble {% if round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">
+                                                <span class="message-author">{{ round.challenged_player.nickname|upper }} ANSWERED</span>
+                                                {{ round.answer_text }}
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ol>
+                    </section>
+                {% endif %}
+            </div>
+
+            <footer class="chat-footer">
+                <span>🎮</span> PLAY NICE. OR DON’T. IT’S YOUR TURN.
+            </footer>
+        </section>
+    </main>
+    <form id="csrf-token-form" hidden>{% csrf_token %}</form>
+    <p class="install-help" data-install-help hidden>
+        To install, open your browser menu and choose <strong>Add to Home Screen</strong>.
+    </p>
+    <script>
+        window.truthDareRoom = {
+            heartbeatUrl: "{% url 'games:heartbeat' room.code %}",
+        };
+    </script>
+    <script src="{% static 'games/pwa.js' %}" defer></script>
+    <script src="{% static 'games/presence.js' %}" defer></script>
+</body>
+</html>
