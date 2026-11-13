@@ -1,0 +1,78 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10090e">
+    <title>Room {{ room.code }} records · Truth or Dare</title>
+    <link rel="icon" href="{% static 'games/icons/icon-192.png' %}" type="image/png">
+    <link rel="stylesheet" href="{% static 'games/style.css' %}">
+</head>
+<body>
+    <main class="page-shell management-shell">
+        <header class="management-header">
+            <a class="brand-mini" href="{% url 'games:home' %}" aria-label="Truth or Dare home">
+                <img class="brand-logo" src="{% static 'games/icons/truth-or-dare-logo.jpg' %}" alt="">
+            </a>
+            <div>
+                <p class="eyebrow">GAME ROOM RECORD</p>
+                <h1>Room {{ room.code }}</h1>
+            </div>
+            <a class="management-link" href="{% url 'games:management' %}">← All rooms</a>
+        </header>
+
+        <section class="management-panel management-room-summary">
+            <div>
+                <span class="management-status status-{{ room.status|lower }}">{{ room.get_status_display }}</span>
+                <p>{{ room.get_game_type_display|default:"Category not set" }} · {{ room.get_difficulty_display|default:"Difficulty not set" }}</p>
+                <p>Created {{ room.created_at|date:"M j, Y · H:i" }}</p>
+            </div>
+            <div class="management-players">
+                {% for player in players %}
+                    <span class="management-player">
+                        <span class="player-avatar {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</span>
+                        {{ player.nickname }}{% if player.is_host %} <small>HOST</small>{% endif %}
+                    </span>
+                {% empty %}
+                    <span class="management-empty">No players joined.</span>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="management-panel" aria-labelledby="rounds-heading">
+            <div class="management-panel-heading">
+                <div>
+                    <p class="eyebrow">NEWEST FIRST</p>
+                    <h2 id="rounds-heading">Round history</h2>
+                </div>
+                <span class="management-count">{{ rounds|length }} rounds</span>
+            </div>
+
+            {% for round in rounds %}
+                <article class="management-round">
+                    <div class="management-round-heading">
+                        <strong>ROUND {{ round.round_number }}</strong>
+                        <span class="management-status status-{{ round.prompt_type }}">{{ round.get_prompt_type_display }}</span>
+                        <time datetime="{{ round.created_at|date:'c' }}">{{ round.created_at|date:"M j, Y · H:i" }}</time>
+                    </div>
+                    <div class="management-round-content">
+                        <div>
+                            <span class="management-field-label">PROMPT</span>
+                            <p>{{ round.prompt_text }}</p>
+                            <small>{{ round.selected_by.nickname|default:"Player unavailable" }} selected · {{ round.challenged_player.nickname|default:"Player unavailable" }} challenged</small>
+                        </div>
+                        <div>
+                            <span class="management-field-label">ANSWER</span>
+                            <p>{% if round.answer_text %}{{ round.answer_text }}{% else %}<span class="management-empty">No text answer recorded.</span>{% endif %}</p>
+                            <small>{{ round.get_answer_type_display }}{% if round.answered_at %} · answered {{ round.answered_at|date:"M j, Y · H:i" }}{% endif %}</small>
+                        </div>
+                    </div>
+                </article>
+            {% empty %}
+                <p class="management-empty">No rounds have been recorded for this room.</p>
+            {% endfor %}
+        </section>
+    </main>
+</body>
+</html>

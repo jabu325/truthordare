@@ -1,0 +1,96 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10090e">
+    <title>Game records · Truth or Dare</title>
+    <link rel="icon" href="{% static 'games/icons/icon-192.png' %}" type="image/png">
+    <link rel="stylesheet" href="{% static 'games/style.css' %}">
+</head>
+<body>
+    <main class="page-shell management-shell">
+        <header class="management-header">
+            <a class="brand-mini" href="{% url 'games:home' %}" aria-label="Truth or Dare home">
+                <img class="brand-logo" src="{% static 'games/icons/truth-or-dare-logo.jpg' %}" alt="">
+            </a>
+            <div>
+                <p class="eyebrow">THE FRIENDSHIP ARCADE</p>
+                <h1>Game records</h1>
+            </div>
+            <a class="management-link" href="{% url 'admin:games_prompt_changelist' %}">Manage prompts</a>
+        </header>
+
+        <section class="management-stats" aria-label="Game statistics">
+            <article class="management-stat">
+                <span>ROOMS</span>
+                <strong>{{ room_total }}</strong>
+            </article>
+            <article class="management-stat">
+                <span>ACTIVE ROOMS</span>
+                <strong>{{ active_room_total }}</strong>
+            </article>
+            <article class="management-stat">
+                <span>PLAYERS</span>
+                <strong>{{ player_total }}</strong>
+            </article>
+            <article class="management-stat">
+                <span>ROUNDS</span>
+                <strong>{{ round_total }}</strong>
+            </article>
+        </section>
+
+        <section class="management-panel" aria-labelledby="rooms-heading">
+            <div class="management-panel-heading">
+                <div>
+                    <p class="eyebrow">LATEST ACTIVITY</p>
+                    <h2 id="rooms-heading">Rooms</h2>
+                </div>
+                <a class="management-link secondary" href="{% url 'admin:index' %}">Django admin</a>
+            </div>
+
+            {% if room_page.object_list %}
+                <div class="management-room-list">
+                    {% for room in room_page %}
+                        <a class="management-room" href="{% url 'games:management_room' room.code %}">
+                            <span class="management-room-main">
+                                <strong>{{ room.code }}</strong>
+                                <span>
+                                    {% for player in room.players.all %}
+                                        {{ player.nickname }}{% if not forloop.last %} · {% endif %}
+                                    {% empty %}
+                                        No players
+                                    {% endfor %}
+                                </span>
+                            </span>
+                            <span class="management-room-meta">
+                                <span class="management-status status-{{ room.status|lower }}">{{ room.get_status_display }}</span>
+                                <span>{{ room.get_game_type_display|default:"Category not set" }} · {{ room.dashboard_player_count }} players · {{ room.dashboard_round_count }} rounds</span>
+                                <time datetime="{{ room.created_at|date:'c' }}">{{ room.created_at|date:"M j, Y · H:i" }}</time>
+                            </span>
+                            <span class="management-arrow" aria-hidden="true">→</span>
+                        </a>
+                    {% endfor %}
+                </div>
+
+                {% if room_page.has_other_pages %}
+                    <nav class="management-pagination" aria-label="Room pages">
+                        {% if room_page.has_previous %}
+                            <a class="management-link secondary" href="?page={{ room_page.previous_page_number }}">← Newer</a>
+                        {% else %}
+                            <span></span>
+                        {% endif %}
+                        <span>Page {{ room_page.number }} of {{ room_page.paginator.num_pages }}</span>
+                        {% if room_page.has_next %}
+                            <a class="management-link secondary" href="?page={{ room_page.next_page_number }}">Older →</a>
+                        {% endif %}
+                    </nav>
+                {% endif %}
+            {% else %}
+                <p class="management-empty">No web game rooms have been played yet.</p>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>

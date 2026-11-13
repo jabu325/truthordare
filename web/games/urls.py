@@ -6,6 +6,12 @@ app_name = "games"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("management/", views.management_dashboard, name="management"),
+    path(
+        "management/rooms/<str:code>/",
+        views.management_room_detail,
+        name="management_room",
+    ),
     path("create/", views.create_room, name="create_room"),
     path("join/", views.join_room, name="join_room"),
     path("service-worker.js", views.service_worker, name="service_worker"),

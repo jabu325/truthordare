@@ -2,8 +2,11 @@ import secrets
 from datetime import timedelta
 from pathlib import Path
 
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Count
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
@@ -17,6 +20,53 @@ PRESENCE_TIMEOUT = timedelta(seconds=75)
 
 def home(request):
     return render(request, "games/home.html")
+
+
+@staff_member_required(login_url="admin:login")
+def management_dashboard(request):
+    rooms = (
+        GameRoom.objects
+        .annotate(
+            dashboard_player_count=Count("players", distinct=True),
+            dashboard_round_count=Count("rounds", distinct=True),
+        )
+        .order_by("-created_at")
+    )
+    paginator = Paginator(rooms, 25)
+
+    return render(
+        request,
+        "games/management.html",
+        {
+            "room_page": paginator.get_page(request.GET.get("page")),
+            "room_total": GameRoom.objects.count(),
+            "active_room_total": GameRoom.objects.filter(status="ACTIVE").count(),
+            "player_total": Player.objects.count(),
+            "round_total": GameRound.objects.count(),
+        },
+    )
+
+
+@staff_member_required(login_url="admin:login")
+def management_room_detail(request, code):
+    room = get_object_or_404(
+        GameRoom.objects.prefetch_related("players"),
+        code=code.upper(),
+    )
+    rounds = room.rounds.select_related(
+        "selected_by",
+        "challenged_player",
+    ).order_by("-round_number")
+
+    return render(
+        request,
+        "games/management_room.html",
+        {
+            "room": room,
+            "players": room.players.all(),
+            "rounds": rounds,
+        },
+    )
 
 
 @require_safe

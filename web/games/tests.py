@@ -285,3 +285,92 @@ class GameFlowTests(TestCase):
         self.room.refresh_from_db()
         self.assertEqual(self.room.phase, "CHOOSING_TYPE")
         self.assertEqual(self.room.prompt_options, [])
+
+
+class ManagementDashboardTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin_user = get_user_model().objects.create_user(
+            username="game-admin",
+            password="test-password",
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.room = GameRoom.objects.create(
+            game_type="friends",
+            difficulty="easy",
+            status="ACTIVE",
+        )
+        self.host = Player.objects.create(
+            room=self.room,
+            nickname="Host",
+            is_host=True,
+        )
+        self.guest = Player.objects.create(
+            room=self.room,
+            nickname="Guest",
+        )
+        self.room.host = self.host
+        self.room.save(update_fields=["host"])
+        self.client = Client()
+
+    def test_dashboard_requires_django_admin_login(self):
+        response = self.client.get("/management/")
+
+        self.assertRedirects(
+            response,
+            "/admin/login/?next=/management/",
+            fetch_redirect_response=False,
+        )
+
+    def test_non_staff_users_cannot_view_dashboard(self):
+        from django.contrib.auth import get_user_model
+
+        user = get_user_model().objects.create_user(
+            username="regular-user",
+            password="test-password",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/management/")
+
+        self.assertRedirects(
+            response,
+            "/admin/login/?next=/management/",
+            fetch_redirect_response=False,
+        )
+
+    def test_staff_user_sees_game_record_dashboard(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get("/management/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Game records")
+        self.assertContains(response, self.room.code)
+        self.assertContains(response, "Host")
+        self.assertContains(response, "Guest")
+        self.assertContains(response, "Manage prompts")
+        self.assertContains(response, "ACTIVE ROOMS")
+
+    def test_staff_user_can_view_room_round_history(self):
+        GameRound.objects.create(
+            room=self.room,
+            round_number=1,
+            prompt_text="A saved web prompt",
+            prompt_type="truth",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="A saved web answer",
+            answer_type="text",
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(f"/management/rooms/{self.room.code}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A saved web prompt")
+        self.assertContains(response, "A saved web answer")
+        self.assertContains(response, "Guest selected")
+        self.assertContains(response, "Host challenged")

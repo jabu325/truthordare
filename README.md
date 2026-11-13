@@ -11,6 +11,7 @@ web version is a Django app with a chat-style interface and installable PWA.
   recent-first round history.
 - Rejoining a seat with the same room code and nickname.
 - Player activity indicators and PWA installation support.
+- Staff-only web game records dashboard using Django admin accounts.
 - SQLite for local development; PostgreSQL can be configured for the web app.
 
 ## Telegram bot
@@ -78,6 +79,11 @@ with:
 ```bash
 python manage.py import_prompts
 ```
+
+The staff-only game records dashboard is available at `/management/`. Sign in
+with the same Django staff account used for `/admin/`. Create the first admin
+account locally with `python manage.py createsuperuser` while the web app's
+database environment is configured.
 
 When using PostgreSQL, set `DATABASE_URL` in the environment. For production,
 also set a strong `SECRET_KEY`, `DEBUG=False`, and `ALLOWED_HOSTS` to the
