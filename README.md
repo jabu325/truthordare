@@ -88,16 +88,32 @@ storage rather than relying on an ephemeral host filesystem for game data.
 ### Deploying on Render
 
 The repository includes a Render Blueprint in `render.yaml`. In Render, create
-a new Blueprint from this repository and provide `DATABASE_URL` when prompted.
-Use the PostgreSQL connection URL for your database; for a Render PostgreSQL
-database in the same region, use its internal connection URL. The Blueprint
-installs the web requirements, collects static files during the build, applies
-database migrations at startup, and launches Django through Gunicorn.
+a new Blueprint from this repository and provide `DATABASE_URL` and
+`DATABASE_URL_UNPOOLED` when prompted. Set `DATABASE_URL` to the pooled
+PostgreSQL connection URL for normal web traffic and `DATABASE_URL_UNPOOLED` to
+the direct connection URL for startup migrations. The Blueprint installs the
+web requirements, collects static files during the build, applies migrations
+using the direct connection, and launches Django through Gunicorn using the
+pooled connection.
 
 The Render hostname is added to Django's allowed hosts and trusted HTTPS
 origins automatically. If you use a custom domain, add it to both the
 `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` environment variables, as applicable.
 Do not set `DEBUG=True` in production.
+
+For an existing manually configured Render service, set its root directory to
+`web`, use the build and start commands from `render.yaml`, and add both
+database URLs to its environment. After the first successful deploy creates the
+schema, import prompts once from a local checkout linked to the same Neon
+branch:
+
+```bash
+cd web
+.venv/bin/python manage.py import_prompts
+```
+
+The import command skips prompts that already exist, so it can safely be run
+again if needed.
 
 ## Data and secrets
 
