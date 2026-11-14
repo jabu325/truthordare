@@ -167,6 +167,7 @@ def get_room_state(room, players=None, current_round=None):
         latest_round = {
             "id": current_round.pk,
             "answer_type": current_round.answer_type,
+            "challenged_player_id": current_round.challenged_player_id,
             "answered_at": (
                 current_round.answered_at.isoformat()
                 if current_round.answered_at

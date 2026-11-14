@@ -324,15 +324,17 @@
                                             <div class="bubble {% if round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">
                                                 <span class="message-author">{{ round.challenged_player.nickname|upper }} ANSWERED</span>
                                                 {{ round.answer_text }}
-                                                <div class="answer-reactions" data-reaction-round="{{ round.pk }}" aria-label="Reactions to answer">
-                                                    {% for emoji, label in reaction_choices %}
-                                                        <button class="answer-reaction {% if player.id == round.challenged_player_id %}reaction-disabled{% endif %}" type="button" data-reaction-emoji="{{ emoji }}" data-reaction-url="{% url 'games:toggle_answer_reaction' room.code round.pk %}" aria-label="{{ label }}{% if player.id == round.challenged_player_id %} (your answer){% endif %}" aria-pressed="false" {% if player.id == round.challenged_player_id %}disabled title="You can’t react to your own answer"{% endif %}>
-                                                            <span aria-hidden="true">{{ emoji }}</span>
-                                                            <span data-reaction-count>0</span>
-                                                        </button>
-                                                    {% endfor %}
-                                                    <span class="sr-only" data-reaction-feedback role="status" aria-live="polite"></span>
-                                                </div>
+                                                {% if player.id != round.challenged_player_id %}
+                                                    <div class="answer-reactions" data-reaction-round="{{ round.pk }}" aria-label="Reactions to answer">
+                                                        {% for emoji, label in reaction_choices %}
+                                                            <button class="answer-reaction" type="button" data-reaction-emoji="{{ emoji }}" data-reaction-url="{% url 'games:toggle_answer_reaction' room.code round.pk %}" aria-label="{{ label }}" aria-pressed="false">
+                                                                <span aria-hidden="true">{{ emoji }}</span>
+                                                                <span data-reaction-count>0</span>
+                                                            </button>
+                                                        {% endfor %}
+                                                        <span class="sr-only" data-reaction-feedback role="status" aria-live="polite"></span>
+                                                    </div>
+                                                {% endif %}
                                             </div>
                                         </div>
                                     {% endif %}
@@ -366,6 +368,7 @@
     <script src="{% static 'games/pwa.js' %}" defer></script>
     <script src="{% static 'games/invite.js' %}" defer></script>
     <script src="{% static 'games/conversation.js' %}" defer></script>
+    <script src="{% static 'games/turn-alert.js' %}" defer></script>
     <script src="{% static 'games/presence.js' %}" defer></script>
 </body>
 </html>

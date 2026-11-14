@@ -91,6 +91,22 @@
             });
             const nextState = JSON.stringify(roomState);
             if (nextState !== currentState) {
+                const previousLatestRound = JSON.parse(currentState).latest_round;
+                const nextLatestRound = roomState.latest_round;
+                const answerJustArrived = (
+                    nextLatestRound
+                    && nextLatestRound.answer_type !== "pending"
+                    && Number(nextLatestRound.challenged_player_id)
+                        !== Number(room.playerId)
+                    && (
+                        previousLatestRound?.id !== nextLatestRound.id
+                        || previousLatestRound.answer_type === "pending"
+                    )
+                );
+                if (answerJustArrived) {
+                    window.truthDareTurnAlert?.play();
+                }
+                currentState = nextState;
                 pendingReload = true;
                 window.setTimeout(reloadWhenSafe, 1000);
             }

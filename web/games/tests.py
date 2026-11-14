@@ -495,7 +495,7 @@ class GameFlowTests(TestCase):
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(AnswerReaction.objects.count(), 0)
 
-    def test_answer_bubbles_allow_reactions_only_for_the_other_player(self):
+    def test_answer_bubbles_show_reactions_only_to_the_other_player(self):
         game_round = GameRound.objects.create(
             room=self.room,
             round_number=1,
@@ -510,19 +510,39 @@ class GameFlowTests(TestCase):
         response = self.host_client.get(f"/room/{self.room.code}/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'disabled title="You can’t react to your own answer"')
+        self.assertNotContains(response, 'data-reaction-round="')
+        self.assertNotContains(response, 'data-reaction-emoji=')
 
         other_player_response = self.guest_client.get(
             f"/room/{self.room.code}/",
         )
+        self.assertContains(other_player_response, 'data-reaction-round="')
         self.assertContains(other_player_response, 'data-reaction-emoji="😋"')
-        self.assertNotContains(
-            other_player_response,
-            'disabled title="You can’t react to your own answer"',
-        )
         self.assertContains(response, "Player chat")
         self.assertContains(response, 'id="room-chat-drawer"')
-        self.assertContains(response, "data-reaction-feedback")
+        self.assertContains(other_player_response, "data-reaction-feedback")
+        self.assertContains(other_player_response, "turn-alert.js")
+
+    def test_heartbeat_includes_answer_owner_for_turn_alert(self):
+        GameRound.objects.create(
+            room=self.room,
+            round_number=1,
+            prompt_text="A prompt",
+            prompt_type="truth",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="An answer",
+            answer_type="text",
+        )
+
+        response = self.guest_client.post(
+            f"/room/{self.room.code}/heartbeat/",
+        )
+
+        self.assertEqual(
+            response.json()["room_state"]["latest_round"]["challenged_player_id"],
+            self.host.pk,
+        )
 
     def test_heartbeat_requires_a_room_player_session(self):
         response = Client().post(f"/room/{self.room.code}/heartbeat/")
