@@ -217,8 +217,8 @@
                                 <div class="bubble {% if player.is_host %}bubble-host{% else %}bubble-guest{% endif %}">Truth or dare? Choose your destiny.</div>
                                 <form method="POST" action="{% url 'games:choose_type' room.code %}" class="choice-grid choice-grid-compact">
                                     {% csrf_token %}
-                                    <button class="choice-button choice-truth" type="submit" name="prompt_type" value="truth">💬 Truth</button>
-                                    <button class="choice-button choice-dare" type="submit" name="prompt_type" value="dare">🔥 Dare</button>
+                                    <button class="choice-button choice-truth" type="submit" name="prompt_type" value="truth" {% if not prompt_availability.truth.remaining %}disabled{% endif %}>💬 Truth</button>
+                                    <button class="choice-button choice-dare" type="submit" name="prompt_type" value="dare" {% if not prompt_availability.dare.remaining %}disabled{% endif %}>🔥 Dare</button>
                                 </form>
                             </div>
                             <div class="avatar avatar-player {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</div>
@@ -229,6 +229,37 @@
                             <div class="message-stack">
                                 <span class="message-author">THE GAME MASTER</span>
                                 <div class="bubble bubble-system">Waiting for {{ room.current_turn.nickname }} to choose Truth or Dare...</div>
+                            </div>
+                        </div>
+                    {% endif %}
+                    {% if not prompt_availability.truth.remaining %}
+                        <p class="prompt-availability-note">
+                            {% if prompt_availability.truth.has_prompts %}{{ prompt_selector.nickname }} has no unused Truth prompts left to choose this game.{% else %}No Truth prompts are available for this setup.{% endif %}
+                        </p>
+                    {% endif %}
+                    {% if not prompt_availability.dare.remaining %}
+                        <p class="prompt-availability-note">
+                            {% if prompt_availability.dare.has_prompts %}{{ prompt_selector.nickname }} has no unused Dare prompts left to choose this game.{% else %}No Dare prompts are available for this setup.{% endif %}
+                        </p>
+                    {% endif %}
+                    {% if not prompt_availability.truth.remaining and not prompt_availability.dare.remaining %}
+                        <div class="message-row">
+                            <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                            <div class="message-stack">
+                                <span class="message-author">SETUP RESET</span>
+                                {% if prompt_availability.truth.has_prompts or prompt_availability.dare.has_prompts %}
+                                    <div class="bubble bubble-system">{{ prompt_selector.nickname }} has chosen every prompt for this setup. Start a new game to choose a category and difficulty again.</div>
+                                {% else %}
+                                    <div class="bubble bubble-system">No prompts are available for this setup. Start a new game to choose a different category or difficulty.</div>
+                                {% endif %}
+                                {% if player.is_host %}
+                                    <form method="POST" action="{% url 'games:start_new_game' room.code %}">
+                                        {% csrf_token %}
+                                        <button class="button button-pink" type="submit">Start a new game</button>
+                                    </form>
+                                {% else %}
+                                    <div class="bubble bubble-system">Waiting for the host to start a new game...</div>
+                                {% endif %}
                             </div>
                         </div>
                     {% endif %}
@@ -305,7 +336,7 @@
                         <ol class="history-list">
                             {% for round in rounds %}
                                 <li class="history-entry">
-                                    <span class="history-round">ROUND {{ round.round_number }} · {{ round.get_prompt_type_display|upper }}</span>
+                                    <span class="history-round">GAME {{ round.game_number }} · ROUND {{ round.round_number }} · {{ round.get_prompt_type_display|upper }}</span>
                                     <div class="history-message-row {% if round.selected_by.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
                                         <div class="avatar avatar-player {% if round.selected_by.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ round.selected_by.nickname|first|upper }}</div>
                                         <div class="bubble {% if round.selected_by.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-prompt">

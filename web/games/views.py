@@ -108,7 +108,7 @@ def management_room_detail(request, code):
     rounds = room.rounds.select_related(
         "selected_by",
         "challenged_player",
-    ).order_by("-round_number")
+    ).order_by("-game_number", "-round_number")
 
     return render(
         request,
@@ -160,7 +160,12 @@ def get_room_state(room, players=None, current_round=None):
     if players is None:
         players = list(room.players.all())
     if current_round is None:
-        current_round = room.rounds.order_by("-round_number").first()
+        current_round = (
+            room.rounds
+            .filter(game_number=room.game_number)
+            .order_by("-round_number")
+            .first()
+        )
 
     latest_round = None
     if current_round is not None:
@@ -178,11 +183,51 @@ def get_room_state(room, players=None, current_round=None):
     return {
         "status": room.status,
         "phase": room.phase,
+        "game_number": room.game_number,
         "current_turn_id": room.current_turn_id,
         "prompt_options": room.prompt_options,
         "player_ids": sorted(member.pk for member in players),
         "latest_round": latest_round,
     }
+
+
+def matching_prompts(room, prompt_type):
+    prompt_categories = [
+        value
+        for value, category in PROMPT_CATEGORY_ALIASES.items()
+        if category == room.game_type
+    ]
+    return Prompt.objects.filter(
+        type=prompt_type,
+        difficulty=room.difficulty,
+        game_type__in=prompt_categories,
+        is_active=True,
+    )
+
+
+def available_prompts(room, prompt_type, selecting_player):
+    used_prompt_ids = room.rounds.filter(
+        game_number=room.game_number,
+        selected_by=selecting_player,
+        prompt__isnull=False,
+    ).values("prompt_id")
+    return matching_prompts(room, prompt_type).exclude(pk__in=used_prompt_ids)
+
+
+def get_prompt_availability(room, selecting_player):
+    used_prompt_ids = room.rounds.filter(
+        game_number=room.game_number,
+        selected_by=selecting_player,
+        prompt__isnull=False,
+    ).values("prompt_id")
+    availability = {}
+    for prompt_type, _label in Prompt.PROMPT_TYPES:
+        matching = matching_prompts(room, prompt_type)
+        availability[prompt_type] = {
+            "remaining": matching.exclude(pk__in=used_prompt_ids).count(),
+            "has_prompts": matching.exists(),
+        }
+    return availability
 
 
 def serialize_chat_messages(room):
@@ -446,12 +491,20 @@ def room_detail(request, code):
         (member for member in room_players if member.pk != player.pk),
         None,
     )
+    prompt_selector = next(
+        (
+            member
+            for member in room_players
+            if member.pk != room.current_turn_id
+        ),
+        None,
+    )
     room_messages = serialize_chat_messages(room)
     rounds = list(
         room.rounds.select_related(
             "selected_by",
             "challenged_player",
-        ).order_by("-round_number")
+        ).order_by("-game_number", "-round_number")
     )
     reaction_state = serialize_reactions(rounds, player)
     for game_round in rounds:
@@ -463,7 +516,14 @@ def room_detail(request, code):
             }
             for emoji, label in AnswerReaction.EMOJI_CHOICES
         ]
-    current_round = rounds[0] if rounds else None
+    current_round = next(
+        (
+            game_round
+            for game_round in rounds
+            if game_round.game_number == room.game_number
+        ),
+        None,
+    )
     invite_url = request.build_absolute_uri(
         reverse("games:room_invite", kwargs={"code": room.code})
     )
@@ -476,6 +536,7 @@ def room_detail(request, code):
             "player": player,
             "players": room_players,
             "opponent": opponent,
+            "prompt_selector": prompt_selector,
             "rounds": rounds,
             "current_round": current_round,
             "prompt_options": prompt_options,
@@ -487,6 +548,14 @@ def room_detail(request, code):
             "last_message_id": room_messages[-1]["id"] if room_messages else 0,
             "reaction_state": reaction_state,
             "reaction_choices": AnswerReaction.EMOJI_CHOICES,
+            "prompt_availability": (
+                get_prompt_availability(
+                    room,
+                    room.players.exclude(pk=room.current_turn_id).first(),
+                )
+                if room.phase == "CHOOSING_TYPE"
+                else {}
+            ),
         },
     )
 
@@ -511,7 +580,12 @@ def heartbeat(request, code):
     active_since = now - PRESENCE_TIMEOUT
     players = room.players.all()
 
-    current_round = room.rounds.order_by("-round_number").first()
+    current_round = (
+        room.rounds
+        .filter(game_number=room.game_number)
+        .order_by("-round_number")
+        .first()
+    )
     chat_messages = serialize_messages_after(room, last_message_id)
     return JsonResponse({
         "players": [
@@ -753,6 +827,60 @@ def configure_difficulty(request, code):
 
 
 @require_POST
+def start_new_game(request, code):
+    with transaction.atomic():
+        room = get_object_or_404(
+            GameRoom.objects.select_for_update(),
+            code=code.upper(),
+        )
+        player = get_room_player(request, room, host_only=True)
+
+        if player is None:
+            messages.error(request, "Only the host can start a new game.")
+            return redirect("games:room", code=code)
+
+        if room.phase != "CHOOSING_TYPE":
+            messages.error(request, "A new game can only start between rounds.")
+            return redirect("games:room", code=code)
+
+        selecting_player = room.players.exclude(pk=room.current_turn_id).first()
+        if selecting_player is None:
+            messages.error(request, "The other player is unavailable.")
+            return redirect("games:room", code=code)
+
+        availability = get_prompt_availability(room, selecting_player)
+        if any(choice["remaining"] for choice in availability.values()):
+            messages.error(
+                request,
+                "There are still unused prompts for this game setup.",
+            )
+            return redirect("games:room", code=code)
+
+        room.game_number += 1
+        room.game_type = ""
+        room.difficulty = ""
+        room.phase = "CHOOSING_CATEGORY"
+        room.current_turn = player
+        room.prompt_options = []
+        room.started_at = None
+        room.finished_at = None
+        room.save(
+            update_fields=[
+                "game_number",
+                "game_type",
+                "difficulty",
+                "phase",
+                "current_turn",
+                "prompt_options",
+                "started_at",
+                "finished_at",
+            ]
+        )
+
+    return redirect("games:room", code=code)
+
+
+@require_POST
 def choose_type(request, code):
     prompt_type = request.POST.get("prompt_type", "")
     if prompt_type not in dict(Prompt.PROMPT_TYPES):
@@ -774,25 +902,24 @@ def choose_type(request, code):
             messages.error(request, "It isn't your turn to choose Truth or Dare.")
             return redirect("games:room", code=code)
 
-        prompt_categories = [
-            value
-            for value, category in PROMPT_CATEGORY_ALIASES.items()
-            if category == room.game_type
-        ]
+        selecting_player = room.players.exclude(pk=player.pk).first()
+        if selecting_player is None:
+            messages.error(request, "The other player is unavailable.")
+            return redirect("games:room", code=code)
+
         prompts = list(
-            Prompt.objects.filter(
-                type=prompt_type,
-                difficulty=room.difficulty,
-                game_type__in=prompt_categories,
-                is_active=True,
-            ).order_by("?")[:3]
+            available_prompts(room, prompt_type, selecting_player)
+            .order_by("?")[:3]
         )
 
         if not prompts:
-            messages.error(
-                request,
-                "There are no active prompts for that choice yet.",
-            )
+            if matching_prompts(room, prompt_type).exists():
+                messages.error(
+                    request,
+                    f"{selecting_player.nickname} has already chosen all prompts of that type in this game.",
+                )
+            else:
+                messages.error(request, "There are no active prompts for that choice yet.")
             return redirect("games:room", code=code)
 
         room.prompt_options = [prompt.id for prompt in prompts]
@@ -840,7 +967,10 @@ def choose_prompt(request, code):
 
         GameRound.objects.create(
             room=room,
-            round_number=room.rounds.count() + 1,
+            game_number=room.game_number,
+            round_number=(
+                room.rounds.filter(game_number=room.game_number).count() + 1
+            ),
             prompt=prompt,
             prompt_text=prompt.text,
             prompt_type=prompt.type,
@@ -885,7 +1015,11 @@ def submit_answer(request, code):
 
         current_round = (
             room.rounds
-            .filter(challenged_player=player, answer_type="pending")
+            .filter(
+                game_number=room.game_number,
+                challenged_player=player,
+                answer_type="pending",
+            )
             .order_by("-round_number")
             .first()
         )

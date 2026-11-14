@@ -102,6 +102,143 @@ class GameFlowTests(TestCase):
         self.assertEqual(self.room.phase, "CHOOSING_TYPE")
         self.assertEqual(self.room.current_turn, self.guest)
 
+    def test_selected_prompt_is_not_offered_again_during_the_same_game(self):
+        self.configure_game()
+        self.add_prompts(count=3)
+
+        self.host_client.post(
+            f"/room/{self.room.code}/type/",
+            {"prompt_type": "truth"},
+        )
+        self.room.refresh_from_db()
+        chosen_prompt_id = self.room.prompt_options[0]
+        self.guest_client.post(
+            f"/room/{self.room.code}/prompt/",
+            {"prompt_id": chosen_prompt_id},
+        )
+        self.host_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "A test answer"},
+        )
+
+        # The host has not selected this prompt, so it remains available to them.
+        self.guest_client.post(
+            f"/room/{self.room.code}/type/",
+            {"prompt_type": "truth"},
+        )
+        self.room.refresh_from_db()
+        self.assertIn(chosen_prompt_id, self.room.prompt_options)
+        self.host_client.post(
+            f"/room/{self.room.code}/prompt/",
+            {"prompt_id": chosen_prompt_id},
+        )
+        self.guest_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "Another test answer"},
+        )
+
+        # After the guest has selected it too, it is no longer offered to them.
+        self.host_client.post(
+            f"/room/{self.room.code}/type/",
+            {"prompt_type": "truth"},
+        )
+        self.room.refresh_from_db()
+        self.assertEqual(len(self.room.prompt_options), 2)
+        self.assertNotIn(chosen_prompt_id, self.room.prompt_options)
+
+        guest_chosen_prompt_id = self.room.prompt_options[0]
+        self.guest_client.post(
+            f"/room/{self.room.code}/prompt/",
+            {"prompt_id": guest_chosen_prompt_id},
+        )
+        self.host_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "A third test answer"},
+        )
+        self.guest_client.post(
+            f"/room/{self.room.code}/type/",
+            {"prompt_type": "truth"},
+        )
+        self.room.refresh_from_db()
+        self.assertEqual(len(self.room.prompt_options), 2)
+        self.assertNotIn(chosen_prompt_id, self.room.prompt_options)
+
+    def test_exhausted_game_can_restart_without_erasing_history(self):
+        self.room.game_type = "friends"
+        self.room.difficulty = "easy"
+        self.room.phase = "CHOOSING_TYPE"
+        self.room.current_turn = self.host
+        self.room.save(
+            update_fields=[
+                "game_type",
+                "difficulty",
+                "phase",
+                "current_turn",
+            ]
+        )
+        prompts = [
+            *self.add_prompts(prompt_type="truth", count=1),
+            *self.add_prompts(prompt_type="dare", count=1),
+        ]
+        for round_number, prompt in enumerate(prompts, start=1):
+            GameRound.objects.create(
+                room=self.room,
+                game_number=1,
+                round_number=round_number,
+                prompt=prompt,
+                prompt_text=prompt.text,
+                prompt_type=prompt.type,
+                selected_by=self.guest,
+                challenged_player=self.host,
+                answer_text="An answer",
+                answer_type="text",
+            )
+
+        exhausted_page = self.host_client.get(f"/room/{self.room.code}/")
+        self.assertContains(
+            exhausted_page,
+            "Guest has chosen every prompt for this setup.",
+        )
+        self.assertContains(exhausted_page, "Start a new game")
+        self.assertContains(exhausted_page, 'value="truth" disabled')
+        self.assertContains(exhausted_page, 'value="dare" disabled')
+
+        forbidden = self.guest_client.post(
+            f"/room/{self.room.code}/new-game/",
+        )
+        self.assertRedirects(
+            forbidden,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        self.room.refresh_from_db()
+        self.assertEqual(self.room.game_number, 1)
+
+        response = self.host_client.post(
+            f"/room/{self.room.code}/new-game/",
+        )
+        self.assertRedirects(
+            response,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        self.room.refresh_from_db()
+        self.assertEqual(self.room.game_number, 2)
+        self.assertEqual(self.room.phase, "CHOOSING_CATEGORY")
+        self.assertEqual(self.room.game_type, "")
+        self.assertEqual(self.room.difficulty, "")
+        self.assertEqual(self.room.current_turn, self.host)
+        self.assertEqual(self.room.rounds.count(), 2)
+
+        self.configure_game()
+        self.host_client.post(
+            f"/room/{self.room.code}/type/",
+            {"prompt_type": "truth"},
+        )
+        self.room.refresh_from_db()
+        self.assertEqual(len(self.room.prompt_options), 1)
+        self.assertEqual(self.room.prompt_options[0], prompts[0].pk)
+
     def test_round_history_shows_newest_round_first(self):
         GameRound.objects.create(
             room=self.room,
@@ -564,7 +701,7 @@ class GameFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Service-Worker-Allowed"], "/")
-        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v10"')
+        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v11"')
         self.assertContains(response, "event.request.mode === \"navigate\"")
         self.assertContains(response, "fetch(event.request).catch")
         self.assertNotContains(response, "cache.put(event.request")

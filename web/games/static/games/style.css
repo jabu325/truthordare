@@ -476,6 +476,19 @@ textarea:focus-visible {
     transform: translateY(-2px);
 }
 
+.choice-button:disabled {
+    cursor: not-allowed;
+    filter: grayscale(0.65);
+    opacity: 0.5;
+    transform: none;
+}
+
+.prompt-availability-note {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
 .button:active,
 .choice-button:active {
     transform: translateY(0);

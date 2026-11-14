@@ -91,6 +91,8 @@ class GameRoom(models.Model):
         ],
     )
 
+    game_number = models.PositiveIntegerField(default=1)
+
     game_type = models.CharField(
         max_length=20,
         choices=GAME_CATEGORIES,
@@ -216,6 +218,8 @@ class GameRound(models.Model):
         related_name="rounds",
     )
 
+    game_number = models.PositiveIntegerField(default=1)
+
     round_number = models.PositiveIntegerField()
 
     prompt = models.ForeignKey(
@@ -263,12 +267,12 @@ class GameRound(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["room", "round_number"],
-                name="unique_round_number_per_room",
+                fields=["room", "game_number", "round_number"],
+                name="unique_round_number_per_game",
             ),
         ]
 
-        ordering = ["round_number"]
+        ordering = ["game_number", "round_number"]
 
     def __str__(self):
         return f"{self.room.code} - Round {self.round_number}"

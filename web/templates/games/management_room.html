@@ -52,7 +52,7 @@
             {% for round in rounds %}
                 <article class="management-round">
                     <div class="management-round-heading">
-                        <strong>ROUND {{ round.round_number }}</strong>
+                        <strong>GAME {{ round.game_number }} · ROUND {{ round.round_number }}</strong>
                         <span class="management-status status-{{ round.prompt_type }}">{{ round.get_prompt_type_display }}</span>
                         <time datetime="{{ round.created_at|date:'c' }}">{{ round.created_at|date:"M j, Y · H:i" }}</time>
                     </div>
