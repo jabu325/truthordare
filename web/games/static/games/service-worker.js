@@ -1,4 +1,4 @@
-const CACHE_NAME = "truth-dare-arcade-v6";
+const CACHE_NAME = "truth-dare-arcade-v7";
 const OFFLINE_URL = "/static/games/offline.html";
 const APP_ASSETS = [
     OFFLINE_URL,
@@ -9,6 +9,7 @@ const APP_ASSETS = [
     "/static/games/icons/icon-512.png",
     "/static/games/pwa.js",
     "/static/games/invite.js",
+    "/static/games/conversation.js",
     "/static/games/presence.js",
 ];
 

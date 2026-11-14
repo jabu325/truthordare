@@ -270,3 +270,57 @@ class GameRound(models.Model):
 
     def __str__(self):
         return f"{self.room.code} - Round {self.round_number}"
+
+
+class RoomMessage(models.Model):
+    room = models.ForeignKey(
+        GameRoom,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.CASCADE,
+        related_name="room_messages",
+    )
+    text = models.CharField(max_length=1000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+
+    def __str__(self):
+        return f"{self.player.nickname}: {self.text[:60]}"
+
+
+class AnswerReaction(models.Model):
+    EMOJI_CHOICES = [
+        ("😂", "Laugh"),
+        ("❤️", "Heart"),
+        ("😲", "Shocked"),
+        ("😋", "Yum"),
+    ]
+
+    game_round = models.ForeignKey(
+        GameRound,
+        on_delete=models.CASCADE,
+        related_name="reactions",
+    )
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.CASCADE,
+        related_name="answer_reactions",
+    )
+    emoji = models.CharField(max_length=8, choices=EMOJI_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["game_round", "player"],
+                name="unique_answer_reaction_per_player",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.player.nickname} reacted {self.emoji}"

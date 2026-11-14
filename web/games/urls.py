@@ -18,6 +18,12 @@ urlpatterns = [
     path("service-worker.js", views.service_worker, name="service_worker"),
     path("room/<str:code>/", views.room_detail, name="room"),
     path("room/<str:code>/heartbeat/", views.heartbeat, name="heartbeat"),
+    path("room/<str:code>/chat/", views.room_chat, name="room_chat"),
+    path(
+        "room/<str:code>/round/<int:round_id>/reaction/",
+        views.toggle_answer_reaction,
+        name="toggle_answer_reaction",
+    ),
     path("room/<str:code>/category/", views.configure_category, name="configure_category"),
     path("room/<str:code>/difficulty/", views.configure_difficulty, name="configure_difficulty"),
     path("room/<str:code>/type/", views.choose_type, name="choose_type"),

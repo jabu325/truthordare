@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import GameRoom, GameRound, Player, Prompt
+from .models import (
+    AnswerReaction,
+    GameRoom,
+    GameRound,
+    Player,
+    Prompt,
+    RoomMessage,
+)
 
 
 @admin.register(Prompt)
@@ -73,3 +80,16 @@ class GameRoundAdmin(admin.ModelAdmin):
     )
 
     list_filter = ("prompt_type", "answer_type")
+
+
+@admin.register(RoomMessage)
+class RoomMessageAdmin(admin.ModelAdmin):
+    list_display = ("room", "player", "text", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("room__code", "player__nickname", "text")
+
+
+@admin.register(AnswerReaction)
+class AnswerReactionAdmin(admin.ModelAdmin):
+    list_display = ("game_round", "player", "emoji", "created_at")
+    list_filter = ("emoji", "created_at")

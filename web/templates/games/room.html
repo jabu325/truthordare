@@ -39,7 +39,39 @@
                 <span class="live-dot"></span>
                 <span>ROOM {{ room.code }}</span>
                 <span class="topbar-status">{{ room.get_status_display|upper }}</span>
+                <button class="room-chat-toggle" type="button" data-chat-open aria-expanded="false" aria-controls="room-chat-drawer">
+                    <span aria-hidden="true">💬</span> Chat
+                </button>
             </div>
+
+            <aside class="room-chat-drawer" id="room-chat-drawer" data-chat-drawer role="dialog" aria-modal="true" aria-labelledby="room-chat-title" hidden>
+                <header class="room-chat-header">
+                    <div>
+                        <p class="eyebrow">ROOM {{ room.code }}</p>
+                        <h2 id="room-chat-title">Player chat</h2>
+                    </div>
+                    <button class="room-chat-close" type="button" data-chat-close aria-label="Close chat">×</button>
+                </header>
+                <ol class="room-chat-messages" data-chat-list aria-live="polite" aria-relevant="additions">
+                    {% for message in room_messages %}
+                        <li class="room-chat-message {% if message.is_host %}chat-host{% else %}chat-guest{% endif %}" data-message-id="{{ message.id }}">
+                            <div class="room-chat-message-meta">
+                                <strong>{{ message.nickname }}</strong>
+                                <time datetime="{{ message.created_at }}">{{ message.time }}</time>
+                            </div>
+                            <p>{{ message.text }}</p>
+                        </li>
+                    {% endfor %}
+                </ol>
+                <p class="room-chat-feedback" data-chat-feedback role="status" aria-live="polite"></p>
+                <form class="room-chat-form" data-chat-form method="post" action="{% url 'games:room_chat' room.code %}">
+                    {% csrf_token %}
+                    <label class="sr-only" for="room-chat-input">Message your friend</label>
+                    <textarea id="room-chat-input" name="message" maxlength="1000" rows="2" placeholder="Say something..." required></textarea>
+                    <button class="button button-pink" type="submit">Send <span aria-hidden="true">↑</span></button>
+                </form>
+            </aside>
+            <button class="room-chat-backdrop" type="button" data-chat-close aria-label="Close chat" hidden></button>
 
             <div class="player-strip">
                 {% for member in players %}
@@ -284,6 +316,15 @@
                                             <div class="bubble {% if round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">
                                                 <span class="message-author">{{ round.challenged_player.nickname|upper }} ANSWERED</span>
                                                 {{ round.answer_text }}
+                                                <div class="answer-reactions" data-reaction-round="{{ round.pk }}" aria-label="Reactions to answer">
+                                                    {% for emoji, label in reaction_choices %}
+                                                        <button class="answer-reaction" type="button" data-reaction-emoji="{{ emoji }}" data-reaction-url="{% url 'games:toggle_answer_reaction' room.code round.pk %}" aria-label="{{ label }}" aria-pressed="false">
+                                                            <span aria-hidden="true">{{ emoji }}</span>
+                                                            <span data-reaction-count>0</span>
+                                                        </button>
+                                                    {% endfor %}
+                                                    <span class="sr-only" data-reaction-feedback role="status" aria-live="polite"></span>
+                                                </div>
                                             </div>
                                         </div>
                                     {% endif %}
@@ -309,8 +350,11 @@
         };
     </script>
     {{ room_state|json_script:"room-state" }}
+    {{ room_messages|json_script:"room-messages" }}
+    {{ reaction_state|json_script:"reaction-state" }}
     <script src="{% static 'games/pwa.js' %}" defer></script>
     <script src="{% static 'games/invite.js' %}" defer></script>
+    <script src="{% static 'games/conversation.js' %}" defer></script>
     <script src="{% static 'games/presence.js' %}" defer></script>
 </body>
 </html>

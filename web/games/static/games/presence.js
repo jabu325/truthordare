@@ -56,7 +56,12 @@
                 throw new Error(`Presence request failed with status ${response.status}.`);
             }
 
-            const { players, room_state: roomState } = await response.json();
+            const {
+                players,
+                room_state: roomState,
+                chat_messages: chatMessages,
+                reactions,
+            } = await response.json();
             players.forEach(({ id, active }) => {
                 const chip = document.querySelector(`[data-player-id="${id}"]`);
                 if (!chip) {
@@ -67,6 +72,10 @@
                 dot.classList.toggle("presence-online", active);
                 dot.classList.toggle("presence-offline", !active);
                 label.textContent = active ? "Active" : "Inactive";
+            });
+            window.truthDareConversation?.updateSnapshot({
+                chat_messages: chatMessages,
+                reactions,
             });
             const nextState = JSON.stringify(roomState);
             if (nextState !== currentState) {

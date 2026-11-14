@@ -73,6 +73,30 @@
                 <p class="management-empty">No rounds have been recorded for this room.</p>
             {% endfor %}
         </section>
+
+        <section class="management-panel" aria-labelledby="conversation-heading">
+            <div class="management-panel-heading">
+                <div>
+                    <p class="eyebrow">ROOM TRANSCRIPT</p>
+                    <h2 id="conversation-heading">Player conversation</h2>
+                </div>
+                <span class="management-count">{{ room_messages|length }} message{{ room_messages|length|pluralize }}</span>
+            </div>
+
+            <ol class="management-conversation">
+                {% for message in room_messages %}
+                    <li class="management-conversation-message {% if message.player.is_host %}conversation-host{% else %}conversation-guest{% endif %}">
+                        <div class="management-conversation-meta">
+                            <strong>{{ message.player.nickname }}{% if message.player.is_host %} <small>HOST</small>{% endif %}</strong>
+                            <time datetime="{{ message.created_at|date:'c' }}">{{ message.created_at|date:"M j, Y · H:i" }}</time>
+                        </div>
+                        <p>{{ message.text }}</p>
+                    </li>
+                {% empty %}
+                    <li class="management-empty">No chat messages have been recorded for this room.</li>
+                {% endfor %}
+            </ol>
+        </section>
     </main>
 </body>
 </html>

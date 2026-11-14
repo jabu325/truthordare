@@ -14,9 +14,17 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
 
 from .constants import PROMPT_CATEGORY_ALIASES
-from .models import GameRoom, GameRound, Player, Prompt
+from .models import (
+    AnswerReaction,
+    GameRoom,
+    GameRound,
+    Player,
+    Prompt,
+    RoomMessage,
+)
 
 PRESENCE_TIMEOUT = timedelta(seconds=75)
+CHAT_HISTORY_LIMIT = 100
 
 
 def home(request):
@@ -109,6 +117,10 @@ def management_room_detail(request, code):
             "room": room,
             "players": room.players.all(),
             "rounds": rounds,
+            "room_messages": room.messages.select_related("player").order_by(
+                "created_at",
+                "pk",
+            ),
         },
     )
 
@@ -170,6 +182,50 @@ def get_room_state(room, players=None, current_round=None):
         "player_ids": sorted(member.pk for member in players),
         "latest_round": latest_round,
     }
+
+
+def serialize_chat_messages(room):
+    messages = list(
+        room.messages.select_related("player")
+        .order_by("-created_at", "-pk")[:CHAT_HISTORY_LIMIT]
+    )
+    return [
+        {
+            "id": message.pk,
+            "nickname": message.player.nickname,
+            "is_host": message.player.is_host,
+            "text": message.text,
+            "created_at": message.created_at.isoformat(),
+            "time": timezone.localtime(message.created_at).strftime("%H:%M"),
+        }
+        for message in reversed(messages)
+    ]
+
+
+def serialize_reactions(rounds, player):
+    round_ids = [game_round.pk for game_round in rounds]
+    counts = AnswerReaction.objects.filter(
+        game_round_id__in=round_ids,
+    ).values("game_round_id", "emoji").annotate(total=Count("pk"))
+    selected = set(
+        AnswerReaction.objects.filter(
+            game_round_id__in=round_ids,
+            player=player,
+        ).values_list("game_round_id", "emoji")
+    )
+    result = {}
+    for game_round in rounds:
+        result[str(game_round.pk)] = {
+            emoji: {
+                "count": 0,
+                "selected": (game_round.pk, emoji) in selected,
+            }
+            for emoji, _label in AnswerReaction.EMOJI_CHOICES
+        }
+    for item in counts:
+        summary = result[str(item["game_round_id"])][item["emoji"]]
+        summary["count"] = item["total"]
+    return result
 
 
 @require_POST
@@ -361,7 +417,13 @@ def room_detail(request, code):
         (member for member in room_players if member.pk != player.pk),
         None,
     )
-    current_round = room.rounds.order_by("-round_number").first()
+    rounds = list(
+        room.rounds.select_related(
+            "selected_by",
+            "challenged_player",
+        ).order_by("-round_number")
+    )
+    current_round = rounds[0] if rounds else None
     invite_url = request.build_absolute_uri(
         reverse("games:room_invite", kwargs={"code": room.code})
     )
@@ -374,15 +436,15 @@ def room_detail(request, code):
             "player": player,
             "players": room_players,
             "opponent": opponent,
-            "rounds": room.rounds.select_related(
-                "challenged_player",
-                "selected_by",
-            ).order_by("-round_number"),
+            "rounds": rounds,
             "current_round": current_round,
             "prompt_options": prompt_options,
             "can_act": can_act,
             "room_state": get_room_state(room, room_players, current_round),
             "invite_url": invite_url,
+            "room_messages": serialize_chat_messages(room),
+            "reaction_state": serialize_reactions(rounds, player),
+            "reaction_choices": AnswerReaction.EMOJI_CHOICES,
         },
     )
 
@@ -414,7 +476,92 @@ def heartbeat(request, code):
             for member in players
         ],
         "room_state": get_room_state(room, players, current_round),
+        "chat_messages": serialize_chat_messages(room),
+        "reactions": serialize_reactions(
+            list(room.rounds.only("pk")),
+            player,
+        ),
     })
+
+
+@require_POST
+def room_chat(request, code):
+    room = get_object_or_404(GameRoom, code=code.upper())
+    player = get_room_player(request, room)
+    if player is None:
+        return JsonResponse(
+            {"error": "You don't have access to this room."},
+            status=403,
+        )
+
+    text = request.POST.get("message", "").strip()
+    if not text:
+        return JsonResponse({"error": "Write a message before sending."}, status=400)
+    if len(text) > 1000:
+        return JsonResponse(
+            {"error": "Messages cannot exceed 1000 characters."},
+            status=400,
+        )
+
+    message = RoomMessage.objects.create(room=room, player=player, text=text)
+    return JsonResponse(
+        {
+            "message": {
+                "id": message.pk,
+                "nickname": player.nickname,
+                "is_host": player.is_host,
+                "text": message.text,
+                "created_at": message.created_at.isoformat(),
+                "time": timezone.localtime(message.created_at).strftime("%H:%M"),
+            },
+        },
+        status=201,
+    )
+
+
+@require_POST
+def toggle_answer_reaction(request, code, round_id):
+    room = get_object_or_404(GameRoom, code=code.upper())
+    player = get_room_player(request, room)
+    if player is None:
+        return JsonResponse(
+            {"error": "You don't have access to this room."},
+            status=403,
+        )
+
+    emoji = request.POST.get("emoji", "")
+    if emoji not in dict(AnswerReaction.EMOJI_CHOICES):
+        return JsonResponse({"error": "Choose a supported reaction."}, status=400)
+
+    with transaction.atomic():
+        game_round = get_object_or_404(
+            GameRound.objects.select_for_update(),
+            pk=round_id,
+            room=room,
+        )
+        if game_round.answer_type == "pending":
+            return JsonResponse(
+                {"error": "You can react after the answer is submitted."},
+                status=400,
+            )
+        reaction = AnswerReaction.objects.filter(
+            game_round=game_round,
+            player=player,
+        ).first()
+        if reaction and reaction.emoji == emoji:
+            reaction.delete()
+        elif reaction:
+            reaction.emoji = emoji
+            reaction.save(update_fields=["emoji"])
+        else:
+            AnswerReaction.objects.create(
+                game_round=game_round,
+                player=player,
+                emoji=emoji,
+            )
+
+    reactions = serialize_reactions([game_round], player)[str(game_round.pk)]
+    return JsonResponse({"round_id": game_round.pk, "reactions": reactions})
 
 
 def get_room_player(request, room, *, host_only=False):
