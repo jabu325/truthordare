@@ -20,6 +20,11 @@ urlpatterns = [
     path("room/<str:code>/heartbeat/", views.heartbeat, name="heartbeat"),
     path("room/<str:code>/chat/", views.room_chat, name="room_chat"),
     path(
+        "room/<str:code>/chat/read/",
+        views.mark_chat_read,
+        name="mark_chat_read",
+    ),
+    path(
         "room/<str:code>/round/<int:round_id>/reaction/",
         views.toggle_answer_reaction,
         name="toggle_answer_reaction",

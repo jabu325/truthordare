@@ -29,20 +29,28 @@
                 <span>ROOM CODE</span>
                 <strong>{{ room.code }}</strong>
             </div>
+        </header>
+
+        <div class="room-floating-actions">
+            <button class="install-app-button room-chat-toggle" type="button" data-chat-open data-unread-count="{{ unread_count }}" aria-label="Open room chat{% if unread_count %}; {{ unread_count }} unread message{{ unread_count|pluralize }}{% endif %}" aria-expanded="false" aria-controls="room-chat-drawer">
+                <span aria-hidden="true">💬</span> Chat
+                <span class="chat-unread-badge" data-chat-badge {% if not unread_count %}hidden{% endif %} aria-hidden="true">{{ unread_count }}</span>
+            </button>
             <button class="install-app-button room-install-button" type="button" data-install-app hidden>
                 Install app
             </button>
-        </header>
+        </div>
 
         <section class="chat-panel game-chat" aria-label="Game chat">
             <div class="chat-topbar">
                 <span class="live-dot"></span>
                 <span>ROOM {{ room.code }}</span>
                 <span class="topbar-status">{{ room.get_status_display|upper }}</span>
-                <button class="room-chat-toggle" type="button" data-chat-open aria-expanded="false" aria-controls="room-chat-drawer">
-                    <span aria-hidden="true">💬</span> Chat
-                </button>
             </div>
+            <p class="chat-message-notice" data-chat-notice role="status" aria-live="polite" {% if not unread_count %}hidden{% endif %}>
+                <span aria-hidden="true">🔴</span>
+                <span data-chat-notice-text>{% if unread_count == 1 %}You’ve received a message{% else %}You’ve received {{ unread_count }} messages{% endif %}</span>
+            </p>
 
             <aside class="room-chat-drawer" id="room-chat-drawer" data-chat-drawer role="dialog" aria-modal="true" aria-labelledby="room-chat-title" hidden>
                 <header class="room-chat-header">
@@ -318,7 +326,7 @@
                                                 {{ round.answer_text }}
                                                 <div class="answer-reactions" data-reaction-round="{{ round.pk }}" aria-label="Reactions to answer">
                                                     {% for emoji, label in reaction_choices %}
-                                                        <button class="answer-reaction" type="button" data-reaction-emoji="{{ emoji }}" data-reaction-url="{% url 'games:toggle_answer_reaction' room.code round.pk %}" aria-label="{{ label }}" aria-pressed="false">
+                                                        <button class="answer-reaction {% if player.id == round.challenged_player_id %}reaction-disabled{% endif %}" type="button" data-reaction-emoji="{{ emoji }}" data-reaction-url="{% url 'games:toggle_answer_reaction' room.code round.pk %}" aria-label="{{ label }}{% if player.id == round.challenged_player_id %} (your answer){% endif %}" aria-pressed="false" {% if player.id == round.challenged_player_id %}disabled title="You can’t react to your own answer"{% endif %}>
                                                             <span aria-hidden="true">{{ emoji }}</span>
                                                             <span data-reaction-count>0</span>
                                                         </button>
@@ -347,6 +355,9 @@
     <script>
         window.truthDareRoom = {
             heartbeatUrl: "{% url 'games:heartbeat' room.code %}",
+            markChatReadUrl: "{% url 'games:mark_chat_read' room.code %}",
+            playerId: {{ player.pk }},
+            lastMessageId: {{ last_message_id }},
         };
     </script>
     {{ room_state|json_script:"room-state" }}

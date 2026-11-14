@@ -192,6 +192,7 @@ def serialize_chat_messages(room):
     return [
         {
             "id": message.pk,
+            "player_id": message.player_id,
             "nickname": message.player.nickname,
             "is_host": message.player.is_host,
             "text": message.text,
@@ -199,6 +200,33 @@ def serialize_chat_messages(room):
             "time": timezone.localtime(message.created_at).strftime("%H:%M"),
         }
         for message in reversed(messages)
+    ]
+
+
+def get_unread_messages(room, player):
+    messages = room.messages.exclude(player=player)
+    if player.last_read_message_id is not None:
+        messages = messages.filter(pk__gt=player.last_read_message_id)
+    return messages
+
+
+def serialize_messages_after(room, message_id):
+    messages = (
+        room.messages.filter(pk__gt=message_id)
+        .select_related("player")
+        .order_by("pk")[:CHAT_HISTORY_LIMIT]
+    )
+    return [
+        {
+            "id": message.pk,
+            "player_id": message.player_id,
+            "nickname": message.player.nickname,
+            "is_host": message.player.is_host,
+            "text": message.text,
+            "created_at": message.created_at.isoformat(),
+            "time": timezone.localtime(message.created_at).strftime("%H:%M"),
+        }
+        for message in messages
     ]
 
 
@@ -417,6 +445,7 @@ def room_detail(request, code):
         (member for member in room_players if member.pk != player.pk),
         None,
     )
+    room_messages = serialize_chat_messages(room)
     rounds = list(
         room.rounds.select_related(
             "selected_by",
@@ -442,7 +471,9 @@ def room_detail(request, code):
             "can_act": can_act,
             "room_state": get_room_state(room, room_players, current_round),
             "invite_url": invite_url,
-            "room_messages": serialize_chat_messages(room),
+            "room_messages": room_messages,
+            "unread_count": get_unread_messages(room, player).count(),
+            "last_message_id": room_messages[-1]["id"] if room_messages else 0,
             "reaction_state": serialize_reactions(rounds, player),
             "reaction_choices": AnswerReaction.EMOJI_CHOICES,
         },
@@ -457,12 +488,20 @@ def heartbeat(request, code):
     if player is None:
         return HttpResponseForbidden("You don't have access to this room.")
 
+    try:
+        last_message_id = int(request.POST.get("last_message_id", "0"))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Invalid message cursor."}, status=400)
+    if last_message_id < 0:
+        return JsonResponse({"error": "Invalid message cursor."}, status=400)
+
     now = timezone.now()
     Player.objects.filter(pk=player.pk).update(last_seen=now)
     active_since = now - PRESENCE_TIMEOUT
     players = room.players.all()
 
     current_round = room.rounds.order_by("-round_number").first()
+    chat_messages = serialize_messages_after(room, last_message_id)
     return JsonResponse({
         "players": [
             {
@@ -476,12 +515,50 @@ def heartbeat(request, code):
             for member in players
         ],
         "room_state": get_room_state(room, players, current_round),
-        "chat_messages": serialize_chat_messages(room),
+        "chat_messages": chat_messages,
+        "last_message_id": (
+            chat_messages[-1]["id"] if chat_messages else last_message_id
+        ),
+        "unread_count": get_unread_messages(room, player).count(),
         "reactions": serialize_reactions(
             list(room.rounds.only("pk")),
             player,
         ),
     })
+
+
+@require_POST
+def mark_chat_read(request, code):
+    room = get_object_or_404(GameRoom, code=code.upper())
+    player = get_room_player(request, room)
+    if player is None:
+        return JsonResponse(
+            {"error": "You don't have access to this room."},
+            status=403,
+        )
+
+    with transaction.atomic():
+        player = Player.objects.select_for_update().get(pk=player.pk)
+        latest_message_id = (
+            room.messages.order_by("-pk").values_list("pk", flat=True).first()
+        )
+        if (
+            latest_message_id is not None
+            and (
+                player.last_read_message_id is None
+                or latest_message_id > player.last_read_message_id
+            )
+        ):
+            player.last_read_message_id = latest_message_id
+            player.save(update_fields=["last_read_message_id"])
+
+    return JsonResponse(
+        {
+            "unread_count": get_unread_messages(room, player).count(),
+            "last_message_id": latest_message_id or 0,
+            "chat_messages": serialize_chat_messages(room),
+        }
+    )
 
 
 @require_POST
@@ -539,6 +616,11 @@ def toggle_answer_reaction(request, code, round_id):
             pk=round_id,
             room=room,
         )
+        if game_round.challenged_player_id == player.pk:
+            return JsonResponse(
+                {"error": "You can't react to your own answer."},
+                status=403,
+            )
         if game_round.answer_type == "pending":
             return JsonResponse(
                 {"error": "You can react after the answer is submitted."},

@@ -10,11 +10,43 @@
     const backdrop = document.querySelector(".room-chat-backdrop");
     const chatForm = document.querySelector("[data-chat-form]");
     const chatFeedback = document.querySelector("[data-chat-feedback]");
+    const chatBadge = document.querySelector("[data-chat-badge]");
+    const chatNotice = document.querySelector("[data-chat-notice]");
+    const chatNoticeText = document.querySelector("[data-chat-notice-text]");
+    const room = window.truthDareRoom;
     const csrfToken = document.querySelector(
         '#csrf-token-form [name="csrfmiddlewaretoken"]',
     )?.value;
     const initialMessages = document.getElementById("room-messages");
     const initialReactions = document.getElementById("reaction-state");
+    let unreadCount = Number(openButton?.dataset.unreadCount || 0);
+    let lastMessageId = Number(room?.lastMessageId || 0);
+    let noticeTimeout;
+
+    const updateUnreadCount = (count) => {
+        unreadCount = Math.max(0, Number(count) || 0);
+        openButton.dataset.unreadCount = String(unreadCount);
+        openButton.setAttribute(
+            "aria-label",
+            `Open room chat${unreadCount ? `; ${unreadCount} unread message${unreadCount === 1 ? "" : "s"}` : ""}`,
+        );
+        chatBadge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+        chatBadge.hidden = unreadCount === 0;
+        if (unreadCount === 0) {
+            chatNotice.hidden = true;
+        }
+    };
+
+    const showMessageNotice = (message) => {
+        if (drawer.hidden) {
+            chatNoticeText.textContent = message;
+            chatNotice.hidden = false;
+            window.clearTimeout(noticeTimeout);
+            noticeTimeout = window.setTimeout(() => {
+                chatNotice.hidden = true;
+            }, 5000);
+        }
+    };
 
     const setDrawerOpen = (open) => {
         drawer.hidden = !open;
@@ -24,8 +56,32 @@
         if (open) {
             messageList.scrollTop = messageList.scrollHeight;
             drawer.querySelector("textarea")?.focus();
+            markChatRead();
         } else {
             openButton.focus();
+        }
+    };
+
+    const markChatRead = async () => {
+        try {
+            const response = await fetch(room.markChatReadUrl, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "X-CSRFToken": csrfToken,
+                    "Accept": "application/json",
+                },
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Could not mark messages as read.");
+            }
+            data.chat_messages.forEach(appendMessage);
+            lastMessageId = Math.max(lastMessageId, data.last_message_id);
+            updateUnreadCount(data.unread_count);
+        } catch (error) {
+            console.error("Could not mark room messages as read.", error);
+            chatFeedback.textContent = error.message;
         }
     };
 
@@ -37,6 +93,7 @@
         const item = document.createElement("li");
         item.className = `room-chat-message ${message.is_host ? "chat-host" : "chat-guest"}`;
         item.dataset.messageId = message.id;
+        lastMessageId = Math.max(lastMessageId, Number(message.id));
 
         const meta = document.createElement("div");
         meta.className = "room-chat-message-meta";
@@ -185,9 +242,36 @@
     });
 
     window.truthDareConversation = {
-        updateSnapshot({ chat_messages, reactions }) {
-            chat_messages.forEach(appendMessage);
+        updateSnapshot({
+            chat_messages,
+            reactions,
+            unread_count,
+            last_message_id,
+        }) {
+            const newMessages = chat_messages.filter(
+                (message) => Number(message.id) > lastMessageId,
+            );
+            newMessages.forEach((message) => {
+                appendMessage(message);
+                if (
+                    Number(message.player_id) !== Number(room.playerId)
+                    && drawer.hidden
+                ) {
+                    showMessageNotice(`You’ve received a message from ${message.nickname}`);
+                }
+            });
+            lastMessageId = Math.max(
+                lastMessageId,
+                Number(last_message_id) || 0,
+            );
+            updateUnreadCount(unread_count);
             applyReactionSnapshot(reactions);
+            if (!drawer.hidden && unreadCount > 0) {
+                markChatRead();
+            }
+        },
+        getLastMessageId() {
+            return lastMessageId;
         },
     };
 
@@ -196,5 +280,8 @@
     }
     if (initialReactions) {
         applyReactionSnapshot(JSON.parse(initialReactions.textContent));
+    }
+    if (unreadCount > 0) {
+        chatNotice.hidden = false;
     }
 })();

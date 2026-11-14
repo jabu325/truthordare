@@ -44,6 +44,13 @@
 
         requestInProgress = true;
         try {
+            const body = new URLSearchParams({
+                last_message_id: String(
+                    window.truthDareConversation?.getLastMessageId()
+                    ?? room.lastMessageId
+                    ?? 0,
+                ),
+            });
             const response = await fetch(room.heartbeatUrl, {
                 method: "POST",
                 credentials: "same-origin",
@@ -51,6 +58,7 @@
                     "Accept": "application/json",
                     "X-CSRFToken": csrfToken,
                 },
+                body,
             });
             if (!response.ok) {
                 throw new Error(`Presence request failed with status ${response.status}.`);
@@ -61,6 +69,8 @@
                 room_state: roomState,
                 chat_messages: chatMessages,
                 reactions,
+                unread_count: unreadCount,
+                last_message_id: lastMessageId,
             } = await response.json();
             players.forEach(({ id, active }) => {
                 const chip = document.querySelector(`[data-player-id="${id}"]`);
@@ -76,6 +86,8 @@
             window.truthDareConversation?.updateSnapshot({
                 chat_messages: chatMessages,
                 reactions,
+                unread_count: unreadCount,
+                last_message_id: lastMessageId,
             });
             const nextState = JSON.stringify(roomState);
             if (nextState !== currentState) {

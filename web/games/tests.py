@@ -256,6 +256,25 @@ class GameFlowTests(TestCase):
         self.assertContains(response, f"/invite/{room.code}/")
         self.assertNotContains(response, 'http-equiv="refresh"')
 
+    def test_chat_button_is_fixed_above_the_install_button(self):
+        response = self.host_client.get(f"/room/{self.room.code}/")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        chat_button_index = content.index('data-chat-open')
+        install_button_index = content.index('data-install-app')
+        self.assertLess(chat_button_index, install_button_index)
+        self.assertContains(response, 'class="room-floating-actions"')
+
+        stylesheet = (
+            Path(__file__).parent
+            / "static"
+            / "games"
+            / "style.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn(".room-floating-actions {", stylesheet)
+        self.assertIn("position: fixed;", stylesheet)
+
     def test_wrong_nickname_cannot_claim_a_seat_in_a_full_room(self):
         response = Client().post(
             "/join/",
@@ -323,6 +342,80 @@ class GameFlowTests(TestCase):
         self.assertEqual(empty_response.status_code, 400)
         self.assertEqual(RoomMessage.objects.count(), 0)
 
+    def test_heartbeat_tracks_incoming_messages_and_read_cursor(self):
+        own_message = RoomMessage.objects.create(
+            room=self.room,
+            player=self.host,
+            text="My own message",
+        )
+        incoming_message = RoomMessage.objects.create(
+            room=self.room,
+            player=self.guest,
+            text="A message for the host",
+        )
+
+        heartbeat = self.host_client.post(
+            f"/room/{self.room.code}/heartbeat/",
+            {"last_message_id": own_message.pk},
+        )
+
+        self.assertEqual(heartbeat.status_code, 200)
+        self.assertEqual(heartbeat.json()["unread_count"], 1)
+        self.assertEqual(
+            [message["id"] for message in heartbeat.json()["chat_messages"]],
+            [incoming_message.pk],
+        )
+
+        marked_read = self.host_client.post(
+            f"/room/{self.room.code}/chat/read/",
+        )
+        self.assertEqual(marked_read.status_code, 200)
+        self.assertEqual(marked_read.json()["unread_count"], 0)
+        self.assertEqual(
+            marked_read.json()["chat_messages"][-1]["id"],
+            incoming_message.pk,
+        )
+        self.host.refresh_from_db()
+        self.assertEqual(
+            self.host.last_read_message_id,
+            incoming_message.pk,
+        )
+
+        next_message = RoomMessage.objects.create(
+            room=self.room,
+            player=self.guest,
+            text="A later message",
+        )
+        next_heartbeat = self.host_client.post(
+            f"/room/{self.room.code}/heartbeat/",
+            {"last_message_id": incoming_message.pk},
+        )
+        self.assertEqual(next_heartbeat.json()["unread_count"], 1)
+        self.assertEqual(
+            next_heartbeat.json()["chat_messages"][0]["id"],
+            next_message.pk,
+        )
+
+    def test_chat_read_marker_requires_room_access(self):
+        response = Client().post(
+            f"/room/{self.room.code}/chat/read/",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_room_page_renders_persistent_unread_badge_and_notice(self):
+        RoomMessage.objects.create(
+            room=self.room,
+            player=self.guest,
+            text="An unread hello",
+        )
+
+        response = self.host_client.get(f"/room/{self.room.code}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-unread-count="1"')
+        self.assertContains(response, "You’ve received a message")
+        self.assertContains(response, "data-chat-badge")
+
     def test_player_can_toggle_or_change_one_reaction_per_answer(self):
         game_round = GameRound.objects.create(
             room=self.room,
@@ -330,7 +423,7 @@ class GameFlowTests(TestCase):
             prompt_text="A prompt",
             prompt_type="truth",
             selected_by=self.guest,
-            challenged_player=self.host,
+            challenged_player=self.guest,
             answer_text="An answer",
             answer_type="text",
         )
@@ -353,13 +446,33 @@ class GameFlowTests(TestCase):
         self.assertEqual(toggled_off.status_code, 200)
         self.assertEqual(AnswerReaction.objects.count(), 0)
 
-        self.guest_client.post(url, {"emoji": "😲"})
-        heartbeat = self.host_client.post(
+        self.host_client.post(url, {"emoji": "😲"})
+        heartbeat = self.guest_client.post(
             f"/room/{self.room.code}/heartbeat/",
         )
         shared_reaction = heartbeat.json()["reactions"][str(game_round.pk)]["😲"]
         self.assertEqual(shared_reaction["count"], 1)
         self.assertFalse(shared_reaction["selected"])
+
+    def test_player_cannot_react_to_their_own_answer(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            round_number=1,
+            prompt_text="A prompt",
+            prompt_type="truth",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="An answer",
+            answer_type="text",
+        )
+        response = self.host_client.post(
+            f"/room/{self.room.code}/round/{game_round.pk}/reaction/",
+            {"emoji": "😂"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "You can't react to your own answer.")
+        self.assertFalse(AnswerReaction.objects.exists())
 
     def test_reactions_require_room_access_and_submitted_answer(self):
         game_round = GameRound.objects.create(
@@ -375,14 +488,14 @@ class GameFlowTests(TestCase):
         forbidden = Client().post(url, {"emoji": "😂"})
         self.assertEqual(forbidden.status_code, 403)
 
-        pending = self.host_client.post(url, {"emoji": "😂"})
+        pending = self.guest_client.post(url, {"emoji": "😂"})
         self.assertEqual(pending.status_code, 400)
 
-        invalid = self.host_client.post(url, {"emoji": "🔥"})
+        invalid = self.guest_client.post(url, {"emoji": "🔥"})
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(AnswerReaction.objects.count(), 0)
 
-    def test_answer_bubbles_render_saved_reaction_controls(self):
+    def test_answer_bubbles_allow_reactions_only_for_the_other_player(self):
         game_round = GameRound.objects.create(
             room=self.room,
             round_number=1,
@@ -393,17 +506,20 @@ class GameFlowTests(TestCase):
             answer_text="An answer",
             answer_type="text",
         )
-        AnswerReaction.objects.create(
-            game_round=game_round,
-            player=self.host,
-            emoji="😋",
-        )
 
         response = self.host_client.get(f"/room/{self.room.code}/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-reaction-round="')
-        self.assertContains(response, 'data-reaction-emoji="😋"')
+        self.assertContains(response, 'disabled title="You can’t react to your own answer"')
+
+        other_player_response = self.guest_client.get(
+            f"/room/{self.room.code}/",
+        )
+        self.assertContains(other_player_response, 'data-reaction-emoji="😋"')
+        self.assertNotContains(
+            other_player_response,
+            'disabled title="You can’t react to your own answer"',
+        )
         self.assertContains(response, "Player chat")
         self.assertContains(response, 'id="room-chat-drawer"')
         self.assertContains(response, "data-reaction-feedback")

@@ -184,6 +184,8 @@ class Player(models.Model):
 
     last_seen = models.DateTimeField(null=True, blank=True)
 
+    last_read_message_id = models.PositiveBigIntegerField(null=True, blank=True)
+
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
