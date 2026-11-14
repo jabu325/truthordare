@@ -24,6 +24,19 @@ def home(request):
 
 @staff_member_required(login_url="admin:login")
 def management_dashboard(request):
+    filters = {
+        "player": request.GET.get("player", "").strip()[:80],
+        "difficulty": request.GET.get("difficulty", "").strip(),
+        "game_type": request.GET.get("game_type", "").strip(),
+        "status": request.GET.get("status", "").strip(),
+    }
+    if filters["difficulty"] not in dict(GameRoom.DIFFICULTIES):
+        filters["difficulty"] = ""
+    if filters["game_type"] not in dict(GameRoom.GAME_CATEGORIES):
+        filters["game_type"] = ""
+    if filters["status"] not in dict(GameRoom.STATUSES):
+        filters["status"] = ""
+
     rooms = (
         GameRoom.objects
         .annotate(
@@ -32,13 +45,43 @@ def management_dashboard(request):
         )
         .order_by("-created_at")
     )
+    if filters["player"]:
+        rooms = rooms.filter(
+            players__nickname__icontains=filters["player"],
+        ).distinct()
+    if filters["difficulty"] in dict(GameRoom.DIFFICULTIES):
+        rooms = rooms.filter(difficulty=filters["difficulty"])
+    if filters["game_type"] in dict(GameRoom.GAME_CATEGORIES):
+        rooms = rooms.filter(game_type=filters["game_type"])
+    if filters["status"] in dict(GameRoom.STATUSES):
+        rooms = rooms.filter(status=filters["status"])
+
     paginator = Paginator(rooms, 25)
+    room_page = paginator.get_page(request.GET.get("page"))
+    pagination_params = request.GET.copy()
+    pagination_params.pop("page", None)
+
+    previous_page_url = None
+    next_page_url = None
+    if room_page.has_previous():
+        pagination_params["page"] = room_page.previous_page_number()
+        previous_page_url = f"?{pagination_params.urlencode()}"
+    if room_page.has_next():
+        pagination_params["page"] = room_page.next_page_number()
+        next_page_url = f"?{pagination_params.urlencode()}"
 
     return render(
         request,
         "games/management.html",
         {
-            "room_page": paginator.get_page(request.GET.get("page")),
+            "room_page": room_page,
+            "filters": filters,
+            "difficulty_choices": GameRoom.DIFFICULTIES,
+            "game_type_choices": GameRoom.GAME_CATEGORIES,
+            "status_choices": GameRoom.STATUSES,
+            "previous_page_url": previous_page_url,
+            "next_page_url": next_page_url,
+            "filtered_room_total": paginator.count,
             "room_total": GameRoom.objects.count(),
             "active_room_total": GameRoom.objects.filter(status="ACTIVE").count(),
             "player_total": Player.objects.count(),

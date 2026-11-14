@@ -354,6 +354,49 @@ class ManagementDashboardTests(TestCase):
         self.assertContains(response, "Manage prompts")
         self.assertContains(response, "ACTIVE ROOMS")
 
+    def test_staff_user_can_filter_rooms_by_player_difficulty_category_and_status(self):
+        other_room = GameRoom.objects.create(
+            game_type="couples",
+            difficulty="hard",
+            status="FINISHED",
+        )
+        Player.objects.create(room=other_room, nickname="Another")
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            "/management/",
+            {
+                "player": "gUeSt",
+                "difficulty": "easy",
+                "game_type": "friends",
+                "status": "ACTIVE",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.room.code)
+        self.assertNotContains(response, other_room.code)
+        self.assertContains(response, "1 matching rooms")
+        self.assertContains(response, 'value="gUeSt"')
+        self.assertContains(response, '<option value="easy" selected>')
+        self.assertContains(response, '<option value="friends" selected>')
+        self.assertContains(response, '<option value="ACTIVE" selected>')
+
+    def test_invalid_filter_choices_are_ignored(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            "/management/",
+            {
+                "difficulty": "unknown",
+                "game_type": "unknown",
+                "status": "unknown",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.room.code)
+
     def test_staff_user_can_view_room_round_history(self):
         GameRound.objects.create(
             room=self.room,

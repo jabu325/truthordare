@@ -50,6 +50,49 @@
                 <a class="management-link secondary" href="{% url 'admin:index' %}">Django admin</a>
             </div>
 
+            <form class="management-filters" method="get" action="{% url 'games:management' %}">
+                <label class="management-filter-player">
+                    <span>PLAYER</span>
+                    <input type="search" name="player" value="{{ filters.player }}" placeholder="Search nickname">
+                </label>
+                <label>
+                    <span>DIFFICULTY</span>
+                    <select name="difficulty">
+                        <option value="">All difficulties</option>
+                        {% for value, label in difficulty_choices %}
+                            <option value="{{ value }}" {% if filters.difficulty == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>GAME TYPE</span>
+                    <select name="game_type">
+                        <option value="">All game types</option>
+                        {% for value, label in game_type_choices %}
+                            <option value="{{ value }}" {% if filters.game_type == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>STATUS</span>
+                    <select name="status">
+                        <option value="">All statuses</option>
+                        {% for value, label in status_choices %}
+                            <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <div class="management-filter-actions">
+                    <button class="management-link" type="submit">Filter rooms</button>
+                    <a class="management-link secondary" href="{% url 'games:management' %}">Clear</a>
+                </div>
+            </form>
+
+            <p class="management-results-count">
+                Showing {{ room_page.start_index|default:0 }}–{{ room_page.end_index|default:0 }}
+                of {{ filtered_room_total }} matching rooms
+            </p>
+
             {% if room_page.object_list %}
                 <div class="management-room-list">
                     {% for room in room_page %}
@@ -76,19 +119,21 @@
 
                 {% if room_page.has_other_pages %}
                     <nav class="management-pagination" aria-label="Room pages">
-                        {% if room_page.has_previous %}
-                            <a class="management-link secondary" href="?page={{ room_page.previous_page_number }}">← Newer</a>
-                        {% else %}
-                            <span></span>
-                        {% endif %}
+                        {% if previous_page_url %}
+                            <a class="management-link secondary" href="{{ previous_page_url }}">← Newer</a>
+                        {% else %}<span></span>{% endif %}
                         <span>Page {{ room_page.number }} of {{ room_page.paginator.num_pages }}</span>
-                        {% if room_page.has_next %}
-                            <a class="management-link secondary" href="?page={{ room_page.next_page_number }}">Older →</a>
+                        {% if next_page_url %}
+                            <a class="management-link secondary" href="{{ next_page_url }}">Older →</a>
                         {% endif %}
                     </nav>
                 {% endif %}
             {% else %}
-                <p class="management-empty">No web game rooms have been played yet.</p>
+                {% if room_total %}
+                    <p class="management-empty">No rooms match those filters.</p>
+                {% else %}
+                    <p class="management-empty">No web game rooms have been played yet.</p>
+                {% endif %}
             {% endif %}
         </section>
     </main>
