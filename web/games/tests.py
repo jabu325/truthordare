@@ -453,6 +453,8 @@ class GameFlowTests(TestCase):
         shared_reaction = heartbeat.json()["reactions"][str(game_round.pk)]["😲"]
         self.assertEqual(shared_reaction["count"], 1)
         self.assertFalse(shared_reaction["selected"])
+        owner_page = self.guest_client.get(f"/room/{self.room.code}/")
+        self.assertContains(owner_page, 'aria-label="Shocked 1"')
 
     def test_player_cannot_react_to_their_own_answer(self):
         game_round = GameRound.objects.create(
@@ -495,7 +497,7 @@ class GameFlowTests(TestCase):
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(AnswerReaction.objects.count(), 0)
 
-    def test_answer_bubbles_show_reactions_only_to_the_other_player(self):
+    def test_answer_owner_sees_received_reactions_and_other_player_can_react(self):
         game_round = GameRound.objects.create(
             room=self.room,
             round_number=1,
@@ -506,18 +508,26 @@ class GameFlowTests(TestCase):
             answer_text="An answer",
             answer_type="text",
         )
+        AnswerReaction.objects.create(
+            game_round=game_round,
+            player=self.guest,
+            emoji="😋",
+        )
 
         response = self.host_client.get(f"/room/{self.room.code}/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'data-reaction-round="')
-        self.assertNotContains(response, 'data-reaction-emoji=')
+        self.assertContains(response, 'aria-label="Reactions received on your answer"')
+        self.assertContains(response, 'data-reaction-emoji="😋"')
+        self.assertContains(response, ">1</span>")
+        self.assertNotContains(response, 'data-reaction-url=')
 
         other_player_response = self.guest_client.get(
             f"/room/{self.room.code}/",
         )
         self.assertContains(other_player_response, 'data-reaction-round="')
         self.assertContains(other_player_response, 'data-reaction-emoji="😋"')
+        self.assertContains(other_player_response, 'data-reaction-url=')
         self.assertContains(response, "Player chat")
         self.assertContains(response, 'id="room-chat-drawer"')
         self.assertContains(other_player_response, "data-reaction-feedback")
@@ -554,6 +564,7 @@ class GameFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Service-Worker-Allowed"], "/")
+        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v10"')
         self.assertContains(response, "event.request.mode === \"navigate\"")
         self.assertContains(response, "fetch(event.request).catch")
         self.assertNotContains(response, "cache.put(event.request")

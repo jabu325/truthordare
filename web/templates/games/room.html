@@ -324,7 +324,16 @@
                                             <div class="bubble {% if round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">
                                                 <span class="message-author">{{ round.challenged_player.nickname|upper }} ANSWERED</span>
                                                 {{ round.answer_text }}
-                                                {% if player.id != round.challenged_player_id %}
+                                                {% if player.id == round.challenged_player_id %}
+                                                    <div class="answer-reactions answer-reactions-readonly" data-reaction-round="{{ round.pk }}" aria-label="Reactions received on your answer">
+                                                        {% for reaction in round.reaction_summary %}
+                                                            <span class="answer-reaction-display" data-reaction-emoji="{{ reaction.emoji }}" data-reaction-label="{{ reaction.label }}" aria-label="{{ reaction.label }} {{ reaction.count }}"{% if not reaction.count %} hidden{% endif %}>
+                                                                <span aria-hidden="true">{{ reaction.emoji }}</span>
+                                                                <span data-reaction-count>{{ reaction.count }}</span>
+                                                            </span>
+                                                        {% endfor %}
+                                                    </div>
+                                                {% else %}
                                                     <div class="answer-reactions" data-reaction-round="{{ round.pk }}" aria-label="Reactions to answer">
                                                         {% for emoji, label in reaction_choices %}
                                                             <button class="answer-reaction" type="button" data-reaction-emoji="{{ emoji }}" data-reaction-url="{% url 'games:toggle_answer_reaction' room.code round.pk %}" aria-label="{{ label }}" aria-pressed="false">

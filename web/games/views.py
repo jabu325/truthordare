@@ -453,6 +453,16 @@ def room_detail(request, code):
             "challenged_player",
         ).order_by("-round_number")
     )
+    reaction_state = serialize_reactions(rounds, player)
+    for game_round in rounds:
+        game_round.reaction_summary = [
+            {
+                "emoji": emoji,
+                "label": label,
+                "count": reaction_state[str(game_round.pk)][emoji]["count"],
+            }
+            for emoji, label in AnswerReaction.EMOJI_CHOICES
+        ]
     current_round = rounds[0] if rounds else None
     invite_url = request.build_absolute_uri(
         reverse("games:room_invite", kwargs={"code": room.code})
@@ -475,7 +485,7 @@ def room_detail(request, code):
             "room_messages": room_messages,
             "unread_count": get_unread_messages(room, player).count(),
             "last_message_id": room_messages[-1]["id"] if room_messages else 0,
-            "reaction_state": serialize_reactions(rounds, player),
+            "reaction_state": reaction_state,
             "reaction_choices": AnswerReaction.EMOJI_CHOICES,
         },
     )

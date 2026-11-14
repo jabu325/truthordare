@@ -123,14 +123,22 @@
         if (!group) {
             return;
         }
-        group.querySelectorAll("[data-reaction-emoji]").forEach((button) => {
-            const state = reactions[button.dataset.reactionEmoji];
+        group.querySelectorAll("[data-reaction-emoji]").forEach((reaction) => {
+            const state = reactions[reaction.dataset.reactionEmoji];
             if (!state) {
                 return;
             }
-            button.querySelector("[data-reaction-count]").textContent = state.count;
-            button.setAttribute("aria-pressed", String(state.selected));
-            button.classList.toggle("reaction-selected", state.selected);
+            reaction.querySelector("[data-reaction-count]").textContent = state.count;
+            if (reaction.matches("button")) {
+                reaction.setAttribute("aria-pressed", String(state.selected));
+                reaction.classList.toggle("reaction-selected", state.selected);
+            } else {
+                reaction.hidden = state.count === 0;
+                reaction.setAttribute(
+                    "aria-label",
+                    `${reaction.dataset.reactionLabel} ${state.count}`,
+                );
+            }
         });
     };
 
@@ -211,7 +219,7 @@
     });
 
     document.addEventListener("click", async (event) => {
-        const button = event.target.closest("[data-reaction-emoji]");
+        const button = event.target.closest("button[data-reaction-emoji]");
         if (!button) {
             return;
         }
