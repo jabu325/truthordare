@@ -165,6 +165,90 @@ class GameFlowTests(TestCase):
         )
         self.assertEqual(self.room.players.count(), 2)
 
+    def test_invite_link_shows_only_a_nickname_entry_and_app_options(self):
+        room = GameRoom.objects.create()
+        Player.objects.create(room=room, nickname="Host", is_host=True)
+        response = Client().get(f"/invite/{room.code.lower()}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Choose your seat name")
+        self.assertContains(response, 'id="invite-nickname"')
+        self.assertContains(response, 'name="invite_flow" value="1"')
+        self.assertContains(response, "Open in installed app")
+        self.assertContains(response, "data-install-app")
+        self.assertNotContains(response, 'type="text" name="code"')
+
+    def test_invite_link_joins_a_waiting_room_without_manual_code_entry(self):
+        room = GameRoom.objects.create()
+        Player.objects.create(
+            room=room,
+            nickname="Host",
+            is_host=True,
+        )
+
+        response = Client().post(
+            "/join/",
+            {
+                "code": room.code,
+                "nickname": "New Guest",
+                "invite_flow": "1",
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            f"/room/{room.code}/",
+            fetch_redirect_response=False,
+        )
+        room.refresh_from_db()
+        self.assertEqual(room.status, "ACTIVE")
+        self.assertTrue(room.players.filter(nickname="New Guest").exists())
+
+    def test_invalid_invite_join_redirects_back_to_invite_with_message(self):
+        client = Client()
+        response = client.post(
+            "/join/",
+            {
+                "code": self.room.code,
+                "nickname": "Impostor",
+                "invite_flow": "1",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, f"/invite/{self.room.code}/")
+        self.assertContains(
+            response,
+            "This room is underway. Enter the nickname you used for your seat to rejoin.",
+        )
+
+    def test_waiting_room_has_copyable_invite_and_no_periodic_page_refresh(self):
+        room = GameRoom.objects.create()
+        host = Player.objects.create(
+            room=room,
+            nickname="Waiting Host",
+            session_key="waiting-host-session",
+            is_host=True,
+        )
+        room.host = host
+        room.save(update_fields=["host"])
+        client = Client()
+        session = client.session
+        session["room_player_tokens"] = {
+            str(room.pk): host.session_key,
+        }
+        session.save()
+
+        response = client.get(f"/room/{room.code}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Copy invite link")
+        self.assertContains(response, "Share invite")
+        self.assertContains(response, "Copy code:")
+        self.assertContains(response, f"/invite/{room.code}/")
+        self.assertNotContains(response, 'http-equiv="refresh"')
+
     def test_wrong_nickname_cannot_claim_a_seat_in_a_full_room(self):
         response = Client().post(
             "/join/",
@@ -192,6 +276,11 @@ class GameFlowTests(TestCase):
         }
         self.assertTrue(presence[self.host.pk])
         self.assertFalse(presence[self.guest.pk])
+        self.assertEqual(response.json()["room_state"]["phase"], self.room.phase)
+        self.assertEqual(
+            response.json()["room_state"]["player_ids"],
+            sorted([self.host.pk, self.guest.pk]),
+        )
         self.host.refresh_from_db()
         self.assertIsNotNone(self.host.last_seen)
 

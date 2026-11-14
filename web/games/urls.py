@@ -7,6 +7,7 @@ app_name = "games"
 urlpatterns = [
     path("", views.home, name="home"),
     path("management/", views.management_dashboard, name="management"),
+    path("invite/<str:code>/", views.room_invite, name="room_invite"),
     path(
         "management/rooms/<str:code>/",
         views.management_room_detail,

@@ -1,0 +1,103 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10090e">
+    <meta name="description" content="Join a Truth or Dare game with a friend.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="{% static 'games/manifest.webmanifest' %}">
+    <link rel="icon" href="{% static 'games/icons/icon-192.png' %}" type="image/png">
+    <link rel="apple-touch-icon" href="{% static 'games/icons/icon-192.png' %}">
+    <title>Join room {{ room.code }} · Truth or Dare</title>
+    <link rel="stylesheet" href="{% static 'games/style.css' %}">
+</head>
+<body>
+    <main class="page-shell home-shell invite-shell">
+        <header class="brand-lockup">
+            <img class="brand-logo brand-mark" src="{% static 'games/icons/truth-or-dare-logo.jpg' %}" alt="Truth or Dare">
+            <div>
+                <p class="eyebrow">THE FRIENDSHIP ARCADE</p>
+                <h1>Truth <span>or</span> Dare</h1>
+            </div>
+            <button class="install-app-button" type="button" data-install-app hidden>Install app</button>
+        </header>
+
+        <section class="chat-panel invite-panel" aria-label="Join a Truth or Dare game">
+            <div class="chat-topbar">
+                <span class="live-dot"></span>
+                <span>YOU’RE INVITED</span>
+                <span class="topbar-status">ROOM {{ room.code }}</span>
+            </div>
+
+            <div class="chat-feed">
+                <div class="message-row">
+                    <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                    <div class="message-stack">
+                        <span class="message-author">THE GAME MASTER</span>
+                        <div class="bubble bubble-pink">
+                            Your friend saved you a seat. Pick a nickname and jump in!
+                        </div>
+                    </div>
+                </div>
+
+                {% if messages %}
+                    <div class="notice-list" role="status">
+                        {% for message in messages %}
+                            <p class="notice">{{ message }}</p>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                <div class="invite-join-card">
+                    {% if room_is_joinable %}
+                        <p class="eyebrow">ROOM {{ room.code }} IS WAITING</p>
+                        <h2>Choose your seat name</h2>
+                        <p class="lobby-description">No room code needed. Your friend is waiting for you.</p>
+                    {% else %}
+                        <p class="eyebrow">ROOM {{ room.code }}</p>
+                        <h2>Rejoin your seat</h2>
+                        <p class="lobby-description">This room has started or is full. Enter the nickname you used before to reclaim your seat.</p>
+                    {% endif %}
+
+                    <form method="POST" action="{% url 'games:join_room' %}" class="stack-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="code" value="{{ room.code }}">
+                        <input type="hidden" name="invite_flow" value="1">
+                        <label for="invite-nickname">Your nickname</label>
+                        <input
+                            id="invite-nickname"
+                            type="text"
+                            name="nickname"
+                            maxlength="24"
+                            placeholder="What should we call you?"
+                            autocomplete="nickname"
+                            required
+                            autofocus
+                        >
+                        <button class="button button-purple" type="submit">
+                            {% if room_is_joinable %}Join the game{% else %}Rejoin your seat{% endif %}
+                            <span aria-hidden="true">→</span>
+                        </button>
+                    </form>
+
+                    <div class="invite-app-options">
+                        <a class="button button-pink" href="{{ invite_url }}">Open in installed app</a>
+                        <p class="lobby-description">If your device is set to open game links in the installed app, this invite will open there. Otherwise, you can play in your browser or install the app.</p>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="chat-footer">
+                <span>🎮</span> GOOD FRIENDS. BAD DECISIONS. GREAT STORIES.
+            </footer>
+        </section>
+    </main>
+    <p class="install-help" data-install-help hidden>
+        Open your browser menu and choose Install app or Add to Home Screen.
+    </p>
+    <script src="{% static 'games/pwa.js' %}" defer></script>
+</body>
+</html>

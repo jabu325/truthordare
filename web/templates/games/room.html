@@ -13,9 +13,6 @@
     <link rel="apple-touch-icon" href="{% static 'games/icons/icon-192.png' %}">
     <title>Room {{ room.code }} · Truth or Dare</title>
     <link rel="stylesheet" href="{% static 'games/style.css' %}">
-    {% if should_refresh %}
-        <meta http-equiv="refresh" content="4">
-    {% endif %}
 </head>
 
 <body>
@@ -106,8 +103,13 @@
                         <div class="message-stack">
                             <span class="message-author">YOUR INVITE</span>
                             <div class="bubble {% if player.is_host %}bubble-host{% else %}bubble-guest{% endif %} invite-bubble">
-                                Share this code with your friend:
-                                <strong class="invite-code">{{ room.code }}</strong>
+                                Send your friend an invite link. They’ll just need to choose a nickname.
+                                <div class="invite-actions" data-invite-tools data-invite-url="{{ invite_url }}" data-room-code="{{ room.code }}">
+                                    <button class="button button-pink" type="button" data-copy-invite>Copy invite link</button>
+                                    <button class="button button-purple" type="button" data-share-invite>Share invite</button>
+                                    <button class="invite-code-button" type="button" data-copy-code>Copy code: <strong class="invite-code">{{ room.code }}</strong></button>
+                                    <span class="invite-feedback" data-invite-feedback role="status" aria-live="polite"></span>
+                                </div>
                             </div>
                         </div>
                         <div class="avatar avatar-player {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</div>
@@ -306,7 +308,9 @@
             heartbeatUrl: "{% url 'games:heartbeat' room.code %}",
         };
     </script>
+    {{ room_state|json_script:"room-state" }}
     <script src="{% static 'games/pwa.js' %}" defer></script>
+    <script src="{% static 'games/invite.js' %}" defer></script>
     <script src="{% static 'games/presence.js' %}" defer></script>
 </body>
 </html>

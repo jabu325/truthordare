@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Count
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
 
@@ -137,6 +138,40 @@ def get_player_token(request, room):
     return tokens.get(str(room.pk))
 
 
+def invite_error_redirect(request, code):
+    if request.POST.get("invite_flow") == "1" and code:
+        return redirect("games:room_invite", code=code)
+    return redirect("games:home")
+
+
+def get_room_state(room, players=None, current_round=None):
+    if players is None:
+        players = list(room.players.all())
+    if current_round is None:
+        current_round = room.rounds.order_by("-round_number").first()
+
+    latest_round = None
+    if current_round is not None:
+        latest_round = {
+            "id": current_round.pk,
+            "answer_type": current_round.answer_type,
+            "answered_at": (
+                current_round.answered_at.isoformat()
+                if current_round.answered_at
+                else None
+            ),
+        }
+
+    return {
+        "status": room.status,
+        "phase": room.phase,
+        "current_turn_id": room.current_turn_id,
+        "prompt_options": room.prompt_options,
+        "player_ids": sorted(member.pk for member in players),
+        "latest_round": latest_round,
+    }
+
+
 @require_POST
 def create_room(request):
     nickname = request.POST.get("nickname", "").strip()
@@ -168,6 +203,24 @@ def create_room(request):
 
     return redirect("games:room", code=room.code)
 
+
+@require_safe
+def room_invite(request, code):
+    room = get_object_or_404(GameRoom, code=code.upper())
+    invite_url = request.build_absolute_uri(
+        reverse("games:room_invite", kwargs={"code": room.code})
+    )
+    return render(
+        request,
+        "games/invite.html",
+        {
+            "room": room,
+            "invite_url": invite_url,
+            "room_is_joinable": room.status == "WAITING" and room.players.count() < 2,
+        },
+    )
+
+
 @require_POST
 def join_room(request):
     nickname = request.POST.get("nickname", "").strip()
@@ -175,11 +228,11 @@ def join_room(request):
 
     if not nickname or not code:
         messages.error(request, "Enter both a nickname and room code.")
-        return redirect("games:home")
+        return invite_error_redirect(request, code)
 
     if len(nickname) > 24:
         messages.error(request, "Nicknames cannot exceed 24 characters.")
-        return redirect("games:home")
+        return invite_error_redirect(request, code)
 
     with transaction.atomic():
 
@@ -192,7 +245,7 @@ def join_room(request):
 
         if room is None:
             messages.error(request, "Room not found.")
-            return redirect("games:home")
+            return invite_error_redirect(request, "")
 
         # Allow an existing player to return to their room.
         token = get_player_token(request, room)
@@ -233,15 +286,15 @@ def join_room(request):
                 request,
                 "This room is underway. Enter the nickname you used for your seat to rejoin.",
             )
-            return redirect("games:home")
+            return invite_error_redirect(request, code)
 
         if room.players.count() >= 2:
             messages.error(request, "This room already has two players.")
-            return redirect("games:home")
+            return invite_error_redirect(request, code)
 
         if room.players.filter(nickname__iexact=nickname).exists():
             messages.error(request, "That nickname is already taken in this room.")
-            return redirect("games:home")
+            return invite_error_redirect(request, code)
 
         player = Player.objects.create(
             room=room,
@@ -308,6 +361,10 @@ def room_detail(request, code):
         (member for member in room_players if member.pk != player.pk),
         None,
     )
+    current_round = room.rounds.order_by("-round_number").first()
+    invite_url = request.build_absolute_uri(
+        reverse("games:room_invite", kwargs={"code": room.code})
+    )
 
     return render(
         request,
@@ -321,10 +378,11 @@ def room_detail(request, code):
                 "challenged_player",
                 "selected_by",
             ).order_by("-round_number"),
-            "current_round": room.rounds.order_by("-round_number").first(),
+            "current_round": current_round,
             "prompt_options": prompt_options,
             "can_act": can_act,
-            "should_refresh": room.phase != "FINISHED" and not can_act,
+            "room_state": get_room_state(room, room_players, current_round),
+            "invite_url": invite_url,
         },
     )
 
@@ -342,6 +400,7 @@ def heartbeat(request, code):
     active_since = now - PRESENCE_TIMEOUT
     players = room.players.all()
 
+    current_round = room.rounds.order_by("-round_number").first()
     return JsonResponse({
         "players": [
             {
@@ -354,6 +413,7 @@ def heartbeat(request, code):
             }
             for member in players
         ],
+        "room_state": get_room_state(room, players, current_round),
     })
 
 
