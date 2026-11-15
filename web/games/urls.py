@@ -13,6 +13,11 @@ urlpatterns = [
         views.management_room_detail,
         name="management_room",
     ),
+    path(
+        "management/rooms/<str:code>/round/<int:round_id>/proof/",
+        views.management_answer_proof,
+        name="management_answer_proof",
+    ),
     path("create/", views.create_room, name="create_room"),
     path("join/", views.join_room, name="join_room"),
     path("service-worker.js", views.service_worker, name="service_worker"),
@@ -28,6 +33,16 @@ urlpatterns = [
         "room/<str:code>/round/<int:round_id>/reaction/",
         views.toggle_answer_reaction,
         name="toggle_answer_reaction",
+    ),
+    path(
+        "room/<str:code>/round/<int:round_id>/review/",
+        views.review_answer,
+        name="review_answer",
+    ),
+    path(
+        "room/<str:code>/round/<int:round_id>/proof/",
+        views.view_answer_proof,
+        name="view_answer_proof",
     ),
     path("room/<str:code>/category/", views.configure_category, name="configure_category"),
     path("room/<str:code>/difficulty/", views.configure_difficulty, name="configure_difficulty"),

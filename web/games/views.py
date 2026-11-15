@@ -1,9 +1,17 @@
+import logging
 import secrets
 from datetime import timedelta
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 
+import cloudinary
+import cloudinary.exceptions
+import cloudinary.uploader
+from cloudinary.utils import cloudinary_url
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import messages
+from django.core.files.uploadedfile import UploadedFile
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count
@@ -16,6 +24,7 @@ from django.views.decorators.http import require_POST, require_safe
 from .constants import PROMPT_CATEGORY_ALIASES
 from .models import (
     AnswerReaction,
+    AnswerProofView,
     GameRoom,
     GameRound,
     Player,
@@ -25,6 +34,14 @@ from .models import (
 
 PRESENCE_TIMEOUT = timedelta(seconds=75)
 CHAT_HISTORY_LIMIT = 100
+MAX_PROOF_IMAGE_SIZE = 5 * 1024 * 1024
+ALLOWED_PROOF_CONTENT_TYPES = {
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+logger = logging.getLogger(__name__)
 
 
 def home(request):
@@ -125,6 +142,24 @@ def management_room_detail(request, code):
     )
 
 
+@staff_member_required(login_url="admin:login")
+@require_safe
+def management_answer_proof(request, code, round_id):
+    game_round = get_object_or_404(
+        GameRound.objects.select_related("room"),
+        pk=round_id,
+        room__code=code.upper(),
+    )
+    if game_round.answer_type == "pending" or not game_round.proof_public_id:
+        return HttpResponse("Proof image not found.", status=404)
+    if not cloudinary_is_configured():
+        return HttpResponse(
+            "Proof image delivery is not configured.",
+            status=503,
+        )
+    return get_proof_image_response(game_round)
+
+
 @require_safe
 def service_worker(request):
     worker_path = Path(__file__).parent / "static" / "games" / "service-worker.js"
@@ -172,6 +207,8 @@ def get_room_state(room, players=None, current_round=None):
         latest_round = {
             "id": current_round.pk,
             "answer_type": current_round.answer_type,
+            "review_status": current_round.review_status,
+            "has_proof": bool(current_round.proof_public_id),
             "challenged_player_id": current_round.challenged_player_id,
             "answered_at": (
                 current_round.answered_at.isoformat()
@@ -185,10 +222,97 @@ def get_room_state(room, players=None, current_round=None):
         "phase": room.phase,
         "game_number": room.game_number,
         "current_turn_id": room.current_turn_id,
+        "winner_id": room.winner_id,
         "prompt_options": room.prompt_options,
         "player_ids": sorted(member.pk for member in players),
+        "player_hearts": [
+            {"id": member.pk, "hearts": member.hearts}
+            for member in sorted(players, key=lambda member: member.pk)
+        ],
         "latest_round": latest_round,
     }
+
+
+def cloudinary_is_configured():
+    try:
+        configuration = cloudinary.config()
+    except ValueError:
+        logger.exception("Cloudinary configuration is invalid.")
+        return False
+    return bool(
+        configuration.cloud_name
+        and configuration.api_key
+        and configuration.api_secret
+    )
+
+
+def is_supported_proof_image(uploaded_file):
+    if uploaded_file.size > MAX_PROOF_IMAGE_SIZE:
+        return False
+
+    signature = uploaded_file.read(12)
+    uploaded_file.seek(0)
+    return (
+        signature.startswith(b"\xff\xd8\xff")
+        or signature.startswith(b"\x89PNG\r\n\x1a\n")
+        or signature.startswith((b"GIF87a", b"GIF89a"))
+        or (
+            signature.startswith(b"RIFF")
+            and signature[8:12] == b"WEBP"
+        )
+    )
+
+
+def upload_proof_image(uploaded_file: UploadedFile):
+    result = cloudinary.uploader.upload(
+        uploaded_file,
+        public_id=f"truth-dare/proofs/{secrets.token_urlsafe(24)}",
+        overwrite=False,
+        resource_type="image",
+        type="authenticated",
+        tags=["truth-dare-proof"],
+    )
+    if not result.get("public_id") or not result.get("version") or not result.get("format"):
+        raise ValueError("Cloudinary returned incomplete proof image metadata.")
+    return result
+
+
+def get_proof_image_response(game_round):
+    signed_url, _options = cloudinary_url(
+        game_round.proof_public_id,
+        resource_type="image",
+        type="authenticated",
+        version=game_round.proof_version,
+        format=game_round.proof_format,
+        secure=True,
+        sign_url=True,
+    )
+    try:
+        with urlopen(signed_url, timeout=10) as cloudinary_response:
+            content_type = cloudinary_response.headers.get_content_type()
+            image_data = cloudinary_response.read(MAX_PROOF_IMAGE_SIZE + 1)
+    except (HTTPError, URLError, TimeoutError) as error:
+        logger.error(
+            "Cloudinary proof delivery failed for round %s (%s).",
+            game_round.pk,
+            type(error).__name__,
+        )
+        return HttpResponse("Proof image could not be loaded.", status=502)
+
+    if (
+        content_type not in ALLOWED_PROOF_CONTENT_TYPES
+        or len(image_data) > MAX_PROOF_IMAGE_SIZE
+    ):
+        logger.error(
+            "Cloudinary returned an invalid proof image for round %s.",
+            game_round.pk,
+        )
+        return HttpResponse("Proof image could not be loaded.", status=502)
+
+    response = HttpResponse(image_data, content_type=content_type)
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 def matching_prompts(room, prompt_type):
@@ -471,6 +595,10 @@ def room_detail(request, code):
             room.phase == "AWAITING_ANSWER"
             and room.current_turn_id == player.id
         )
+        or (
+            room.phase == "REVIEWING_ANSWER"
+            and room.current_turn_id == player.id
+        )
     )
     prompt_options = []
     if room.phase == "CHOOSING_PROMPT":
@@ -524,6 +652,19 @@ def room_detail(request, code):
         ),
         None,
     )
+    viewed_proof_round_ids = set(
+        AnswerProofView.objects.filter(
+            game_round_id__in=[game_round.pk for game_round in rounds],
+            player=player,
+        ).values_list("game_round_id", flat=True)
+    )
+    for game_round in rounds:
+        game_round.proof_viewed = game_round.pk in viewed_proof_round_ids
+        game_round.is_current_review = (
+            room.phase == "REVIEWING_ANSWER"
+            and current_round is not None
+            and game_round.pk == current_round.pk
+        )
     invite_url = request.build_absolute_uri(
         reverse("games:room_invite", kwargs={"code": room.code})
     )
@@ -548,6 +689,7 @@ def room_detail(request, code):
             "last_message_id": room_messages[-1]["id"] if room_messages else 0,
             "reaction_state": reaction_state,
             "reaction_choices": AnswerReaction.EMOJI_CHOICES,
+            "cloudinary_available": cloudinary_is_configured(),
             "prompt_availability": (
                 get_prompt_availability(
                     room,
@@ -839,38 +981,44 @@ def start_new_game(request, code):
             messages.error(request, "Only the host can start a new game.")
             return redirect("games:room", code=code)
 
-        if room.phase != "CHOOSING_TYPE":
+        if room.phase not in {"CHOOSING_TYPE", "FINISHED"}:
             messages.error(request, "A new game can only start between rounds.")
             return redirect("games:room", code=code)
 
-        selecting_player = room.players.exclude(pk=room.current_turn_id).first()
-        if selecting_player is None:
-            messages.error(request, "The other player is unavailable.")
-            return redirect("games:room", code=code)
+        if room.phase == "CHOOSING_TYPE":
+            selecting_player = room.players.exclude(pk=room.current_turn_id).first()
+            if selecting_player is None:
+                messages.error(request, "The other player is unavailable.")
+                return redirect("games:room", code=code)
 
-        availability = get_prompt_availability(room, selecting_player)
-        if any(choice["remaining"] for choice in availability.values()):
-            messages.error(
-                request,
-                "There are still unused prompts for this game setup.",
-            )
-            return redirect("games:room", code=code)
+            availability = get_prompt_availability(room, selecting_player)
+            if any(choice["remaining"] for choice in availability.values()):
+                messages.error(
+                    request,
+                    "There are still unused prompts for this game setup.",
+                )
+                return redirect("games:room", code=code)
 
         room.game_number += 1
         room.game_type = ""
         room.difficulty = ""
+        room.status = "ACTIVE"
         room.phase = "CHOOSING_CATEGORY"
         room.current_turn = player
+        room.winner = None
         room.prompt_options = []
         room.started_at = None
         room.finished_at = None
+        room.players.update(hearts=5)
         room.save(
             update_fields=[
                 "game_number",
                 "game_type",
                 "difficulty",
+                "status",
                 "phase",
                 "current_turn",
+                "winner",
                 "prompt_options",
                 "started_at",
                 "finished_at",
@@ -987,6 +1135,7 @@ def choose_prompt(request, code):
 @require_POST
 def submit_answer(request, code):
     answer_text = request.POST.get("answer", "").strip()
+    proof_image = request.FILES.get("proof_image")
     if not answer_text:
         messages.error(request, "Please enter your answer.")
         return redirect("games:room", code=code)
@@ -994,6 +1143,20 @@ def submit_answer(request, code):
     if len(answer_text) > 5000:
         messages.error(request, "Answers cannot exceed 5000 characters.")
         return redirect("games:room", code=code)
+
+    if proof_image:
+        if not is_supported_proof_image(proof_image):
+            messages.error(
+                request,
+                "Choose a JPG, PNG, GIF, or WebP image up to 5 MB.",
+            )
+            return redirect("games:room", code=code)
+        if not cloudinary_is_configured():
+            messages.error(
+                request,
+                "Image proof is unavailable because Cloudinary is not configured.",
+            )
+            return redirect("games:room", code=code)
 
     with transaction.atomic():
         room = get_object_or_404(
@@ -1029,14 +1192,167 @@ def submit_answer(request, code):
             messages.error(request, "The current round is unavailable.")
             return redirect("games:room", code=code)
 
+        if proof_image and current_round.prompt_type != "dare":
+            messages.error(request, "Image proof can only be attached to a dare.")
+            return redirect("games:room", code=code)
+
+        proof = None
+        if proof_image:
+            try:
+                proof = upload_proof_image(proof_image)
+            except cloudinary.exceptions.Error:
+                logger.exception(
+                    "Cloudinary proof upload failed for room %s.",
+                    room.code,
+                )
+                messages.error(
+                    request,
+                    "Cloudinary could not store your proof image. Please try again.",
+                )
+                return redirect("games:room", code=code)
+            except ValueError:
+                logger.exception(
+                    "Cloudinary proof upload returned invalid configuration or metadata for room %s.",
+                    room.code,
+                )
+                messages.error(
+                    request,
+                    "Cloudinary is not configured correctly for proof uploads.",
+                )
+                return redirect("games:room", code=code)
+
         current_round.answer_text = answer_text
-        current_round.answer_type = "text"
+        current_round.answer_type = "media" if proof else "text"
+        if proof:
+            current_round.proof_public_id = proof["public_id"]
+            current_round.proof_version = proof["version"]
+            current_round.proof_format = proof["format"]
         current_round.answered_at = timezone.now()
         current_round.save(
-            update_fields=["answer_text", "answer_type", "answered_at"]
+            update_fields=[
+                "answer_text",
+                "answer_type",
+                "proof_public_id",
+                "proof_version",
+                "proof_format",
+                "answered_at",
+            ]
         )
         room.current_turn = next_player
-        room.phase = "CHOOSING_TYPE"
+        room.phase = "REVIEWING_ANSWER"
         room.save(update_fields=["current_turn", "phase"])
 
     return redirect("games:room", code=code)
+
+
+@require_POST
+def review_answer(request, code, round_id):
+    review = request.POST.get("review", "")
+    if review not in {"valid", "unsatisfying"}:
+        messages.error(request, "Choose whether the answer is satisfying.")
+        return redirect("games:room", code=code)
+
+    with transaction.atomic():
+        room = get_object_or_404(
+            GameRoom.objects.select_for_update(),
+            code=code.upper(),
+        )
+        reviewer = get_room_player(request, room)
+        if reviewer is None:
+            messages.error(request, "You don't have access to this room.")
+            return redirect("games:home")
+
+        game_round = get_object_or_404(
+            GameRound.objects.select_for_update(),
+            pk=round_id,
+            room=room,
+            game_number=room.game_number,
+        )
+        if (
+            room.phase != "REVIEWING_ANSWER"
+            or room.current_turn_id != reviewer.pk
+            or game_round.selected_by_id != reviewer.pk
+            or game_round.answer_type == "pending"
+            or game_round.review_status != "pending"
+        ):
+            messages.error(request, "You can't review this answer right now.")
+            return redirect("games:room", code=code)
+
+        if game_round.challenged_player_id is None:
+            messages.error(request, "The player who answered is unavailable.")
+            return redirect("games:room", code=code)
+
+        game_round.review_status = (
+            "accepted" if review == "valid" else "rejected"
+        )
+        game_round.reviewed_at = timezone.now()
+        game_round.save(update_fields=["review_status", "reviewed_at"])
+
+        if review == "unsatisfying":
+            answering_player = Player.objects.select_for_update().get(
+                pk=game_round.challenged_player_id,
+                room=room,
+            )
+            answering_player.hearts = max(0, answering_player.hearts - 1)
+            answering_player.save(update_fields=["hearts"])
+
+            if answering_player.hearts == 0:
+                room.winner = reviewer
+                room.status = "FINISHED"
+                room.phase = "FINISHED"
+                room.finished_at = timezone.now()
+                room.save(
+                    update_fields=[
+                        "winner",
+                        "status",
+                        "phase",
+                        "finished_at",
+                    ]
+                )
+            else:
+                room.phase = "CHOOSING_TYPE"
+                room.save(update_fields=["phase"])
+        else:
+            room.phase = "CHOOSING_TYPE"
+            room.save(update_fields=["phase"])
+
+    return redirect("games:room", code=code)
+
+
+@require_POST
+def view_answer_proof(request, code, round_id):
+    with transaction.atomic():
+        room = get_object_or_404(
+            GameRoom.objects.select_for_update(),
+            code=code.upper(),
+        )
+        player = get_room_player(request, room)
+        if player is None:
+            return HttpResponseForbidden("You don't have access to this room.")
+
+        game_round = get_object_or_404(
+            GameRound.objects.select_for_update(),
+            pk=round_id,
+            room=room,
+        )
+        if game_round.answer_type == "pending" or not game_round.proof_public_id:
+            return HttpResponse("Proof image not found.", status=404)
+        if AnswerProofView.objects.filter(
+            game_round=game_round,
+            player=player,
+        ).exists():
+            return HttpResponse("This proof image was already viewed.", status=410)
+        if not cloudinary_is_configured():
+            return HttpResponse(
+                "Proof image delivery is not configured.",
+                status=503,
+            )
+
+        response = get_proof_image_response(game_round)
+        if response.status_code != 200:
+            return response
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        AnswerProofView.objects.create(game_round=game_round, player=player)
+
+    return response

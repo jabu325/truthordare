@@ -23,7 +23,7 @@
             </a>
             <div class="room-heading-copy">
                 <p class="eyebrow">THE FRIENDSHIP ARCADE</p>
-                <h1>Game in progress</h1>
+                <h1>{% if room.phase == "FINISHED" %}Game over{% else %}Game in progress{% endif %}</h1>
             </div>
             <div class="room-code-badge">
                 <span>ROOM CODE</span>
@@ -90,6 +90,12 @@
                             <span class="presence-dot {% if member.is_active %}presence-online{% else %}presence-offline{% endif %}" aria-hidden="true"></span>
                             <span data-presence-label>{% if member.is_active %}Active{% else %}Inactive{% endif %}</span>
                         </span>
+                        <span class="player-hearts" aria-label="{{ member.hearts }} of 5 hearts">
+                            {% for heart in "12345" %}
+                                <span aria-hidden="true">{% if forloop.counter <= member.hearts %}❤️{% else %}🖤{% endif %}</span>
+                            {% endfor %}
+                            <span class="player-heart-count">{{ member.hearts }}/5</span>
+                        </span>
                         {% if member.id == room.current_turn_id %}
                             <span class="turn-tag">UP NOW</span>
                         {% endif %}
@@ -125,6 +131,10 @@
                                 <span class="bubble-break">A challenge is on the way. Pick the perfect one.</span>
                             {% elif room.phase == "AWAITING_ANSWER" %}
                                 <span class="bubble-break">Challenge accepted? Your moment is now.</span>
+                            {% elif room.phase == "REVIEWING_ANSWER" %}
+                                <span class="bubble-break">Answer submitted. The other player must review it before the game continues.</span>
+                            {% elif room.phase == "FINISHED" %}
+                                <span class="bubble-break">This game is over.</span>
                             {% endif %}
                         </div>
                     </div>
@@ -305,10 +315,18 @@
                         <div class="message-row {% if player.is_host %}speaker-host{% else %}speaker-guest{% endif %} answer-row">
                             <div class="message-stack">
                                 <span class="message-author">YOUR REPLY</span>
-                                <form method="POST" action="{% url 'games:submit_answer' room.code %}" class="answer-form">
+                                <form method="POST" enctype="multipart/form-data" action="{% url 'games:submit_answer' room.code %}" class="answer-form">
                                     {% csrf_token %}
                                     <label class="sr-only" for="answer">Your answer</label>
                                     <textarea id="answer" name="answer" maxlength="5000" placeholder="Type your answer..." required></textarea>
+                                    {% if current_round.prompt_type == "dare" %}
+                                        {% if cloudinary_available %}
+                                            <label class="proof-upload-label" for="proof-image">Optional dare proof image (JPG, PNG, GIF, or WebP; up to 5 MB)</label>
+                                            <input id="proof-image" type="file" name="proof_image" accept="image/jpeg,image/png,image/gif,image/webp">
+                                        {% else %}
+                                            <p class="proof-upload-note">Image proof is unavailable until Cloudinary is configured. You can still submit a text answer.</p>
+                                        {% endif %}
+                                    {% endif %}
                                     <button class="button button-pink" type="submit">Send answer <span aria-hidden="true">↑</span></button>
                                 </form>
                             </div>
@@ -324,6 +342,71 @@
                             </div>
                         </div>
                     {% endif %}
+                {% elif room.phase == "REVIEWING_ANSWER" %}
+                    <div class="message-row {% if current_round.challenged_player.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                        <div class="avatar avatar-player {% if current_round.challenged_player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ current_round.challenged_player.nickname|first|upper }}</div>
+                        <div class="message-stack">
+                            <span class="message-author">{{ current_round.challenged_player.nickname|upper }} ANSWERED · {{ current_round.get_prompt_type_display|upper }}</span>
+                            <div class="bubble {% if current_round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">{{ current_round.answer_text }}</div>
+                            {% if current_round.proof_public_id %}
+                                {% if current_round.proof_viewed %}
+                                    <p class="proof-upload-note">You have used your one view of this proof.</p>
+                                {% else %}
+                                    <form class="proof-view-form" data-proof-view method="POST" action="{% url 'games:view_answer_proof' room.code current_round.pk %}">
+                                        {% csrf_token %}
+                                        <button class="button button-purple" type="submit">👁 View proof once</button>
+                                    </form>
+                                    <p class="proof-feedback" data-proof-feedback role="status" aria-live="polite"></p>
+                                    <div class="proof-image-display" data-proof-display hidden></div>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if room.current_turn_id == player.id %}
+                        <div class="message-row {% if player.is_host %}speaker-host{% else %}speaker-guest{% endif %}">
+                            <div class="message-stack">
+                                <span class="message-author">YOUR REVIEW</span>
+                                <div class="bubble {% if player.is_host %}bubble-host{% else %}bubble-guest{% endif %}">
+                                    Is {{ current_round.challenged_player.nickname }}’s answer satisfying?
+                                    {% if current_round.proof_public_id %}Each player can view the proof once.{% endif %}
+                                </div>
+                                <form method="POST" action="{% url 'games:review_answer' room.code current_round.pk %}" class="answer-review-form">
+                                    {% csrf_token %}
+                                    <button class="button button-pink" type="submit" name="review" value="valid" aria-label="Accept answer">👍 Satisfying</button>
+                                    <button class="button button-purple" type="submit" name="review" value="unsatisfying" aria-label="Reject answer">👎 Unsatisfying · lose 1 heart</button>
+                                </form>
+                            </div>
+                            <div class="avatar avatar-player {% if player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ player.nickname|first|upper }}</div>
+                        </div>
+                    {% else %}
+                        <div class="message-row">
+                            <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                            <div class="message-stack">
+                                <span class="message-author">WAITING FOR REVIEW</span>
+                                <div class="bubble bubble-system">{{ current_round.selected_by.nickname }} must review the answer before the game continues.</div>
+                            </div>
+                        </div>
+                    {% endif %}
+                {% elif room.phase == "FINISHED" %}
+                    <div class="message-row">
+                        <div class="avatar avatar-bot" aria-label="Game bot">🤖</div>
+                        <div class="message-stack">
+                            <span class="message-author">GAME OVER</span>
+                            {% if room.winner_id == player.id %}
+                                <div class="bubble bubble-system">You won! {{ current_round.challenged_player.nickname }} ran out of hearts. Your communication skills are elite. ❤️</div>
+                            {% else %}
+                                <div class="bubble bubble-system">{{ room.winner.nickname }} won! You ran out of hearts — looks like your communication skills need work. 💔</div>
+                            {% endif %}
+                            {% if player.is_host %}
+                                <form method="POST" action="{% url 'games:start_new_game' room.code %}">
+                                    {% csrf_token %}
+                                    <button class="button button-pink" type="submit">Start a new game</button>
+                                </form>
+                            {% else %}
+                                <div class="bubble bubble-system">The host can start a new game and choose a new setup.</div>
+                            {% endif %}
+                        </div>
+                    </div>
                 {% endif %}
 
                 {% if rounds %}
@@ -355,6 +438,19 @@
                                             <div class="bubble {% if round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">
                                                 <span class="message-author">{{ round.challenged_player.nickname|upper }} ANSWERED</span>
                                                 {{ round.answer_text }}
+                                                {% if round.proof_public_id and not round.proof_viewed and not round.is_current_review %}
+                                                    <form class="proof-view-form" data-proof-view method="POST" action="{% url 'games:view_answer_proof' room.code round.pk %}">
+                                                        {% csrf_token %}
+                                                        <button class="button button-purple" type="submit">👁 View proof once</button>
+                                                    </form>
+                                                    <p class="proof-feedback" data-proof-feedback role="status" aria-live="polite"></p>
+                                                    <div class="proof-image-display" data-proof-display hidden></div>
+                                                {% elif round.proof_public_id and round.proof_viewed %}
+                                                    <p class="proof-upload-note">You have used your one view of this proof.</p>
+                                                {% endif %}
+                                                {% if round.review_status != "pending" %}
+                                                    <span class="answer-review-status">Review: {{ round.get_review_status_display }}</span>
+                                                {% endif %}
                                                 {% if player.id == round.challenged_player_id %}
                                                     <div class="answer-reactions answer-reactions-readonly" data-reaction-round="{{ round.pk }}" aria-label="Reactions received on your answer">
                                                         {% for reaction in round.reaction_summary %}
@@ -409,6 +505,7 @@
     <script src="{% static 'games/invite.js' %}" defer></script>
     <script src="{% static 'games/conversation.js' %}" defer></script>
     <script src="{% static 'games/turn-alert.js' %}" defer></script>
+    <script src="{% static 'games/proof.js' %}" defer></script>
     <script src="{% static 'games/presence.js' %}" defer></script>
 </body>
 </html>

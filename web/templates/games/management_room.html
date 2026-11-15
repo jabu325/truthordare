@@ -68,6 +68,16 @@
                             <small>{{ round.get_answer_type_display }}{% if round.answered_at %} · answered {{ round.answered_at|date:"M j, Y · H:i" }}{% endif %}</small>
                         </div>
                     </div>
+                    {% if round.proof_public_id %}
+                        <div class="management-proof">
+                            <span class="management-field-label">DARE PROOF</span>
+                            <img
+                                src="{% url 'games:management_answer_proof' room.code round.pk %}"
+                                alt="Dare proof for game {{ round.game_number }}, round {{ round.round_number }}"
+                                loading="lazy"
+                            >
+                        </div>
+                    {% endif %}
                 </article>
             {% empty %}
                 <p class="management-empty">No rounds have been recorded for this room.</p>

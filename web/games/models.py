@@ -77,6 +77,7 @@ class GameRoom(models.Model):
     ("CHOOSING_TYPE", "Choosing Truth or Dare"),
     ("CHOOSING_PROMPT", "Choosing a prompt"),
     ("AWAITING_ANSWER", "Awaiting answer"),
+    ("REVIEWING_ANSWER", "Reviewing answer"),
     ("ROUND_COMPLETE", "Round complete"),
     ("FINISHED", "Finished"),
     ]
@@ -135,6 +136,14 @@ class GameRoom(models.Model):
         related_name="active_turns",
     )
 
+    winner = models.ForeignKey(
+        "Player",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="won_games",
+    )
+
     prompt_options = models.JSONField(default=list, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -188,6 +197,8 @@ class Player(models.Model):
 
     last_read_message_id = models.PositiveBigIntegerField(null=True, blank=True)
 
+    hearts = models.PositiveSmallIntegerField(default=5)
+
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -210,6 +221,12 @@ class GameRound(models.Model):
         ("pending", "Pending"),
         ("text", "Text"),
         ("media", "Media"),
+    ]
+
+    REVIEW_STATUSES = [
+        ("pending", "Awaiting review"),
+        ("accepted", "Satisfying"),
+        ("rejected", "Unsatisfying"),
     ]
 
     room = models.ForeignKey(
@@ -260,6 +277,20 @@ class GameRound(models.Model):
         default="pending",
     )
 
+    review_status = models.CharField(
+        max_length=10,
+        choices=REVIEW_STATUSES,
+        default="pending",
+    )
+
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    proof_public_id = models.CharField(max_length=255, blank=True)
+
+    proof_version = models.PositiveBigIntegerField(null=True, blank=True)
+
+    proof_format = models.CharField(max_length=10, blank=True)
+
     answered_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -276,6 +307,28 @@ class GameRound(models.Model):
 
     def __str__(self):
         return f"{self.room.code} - Round {self.round_number}"
+
+
+class AnswerProofView(models.Model):
+    game_round = models.ForeignKey(
+        GameRound,
+        on_delete=models.CASCADE,
+        related_name="proof_views",
+    )
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.CASCADE,
+        related_name="answer_proof_views",
+    )
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["game_round", "player"],
+                name="unique_proof_view_per_player",
+            ),
+        ]
 
 
 class RoomMessage(models.Model):

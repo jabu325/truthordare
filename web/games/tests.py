@@ -3,10 +3,14 @@ import json
 from pathlib import Path
 
 from django.test import Client, TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.http import HttpResponse
 from django.utils import timezone
+from unittest.mock import patch
 
 from .models import (
     AnswerReaction,
+    AnswerProofView,
     GameRoom,
     GameRound,
     Player,
@@ -66,6 +70,12 @@ class GameFlowTests(TestCase):
             {"difficulty": "easy"},
         )
 
+    def review_round(self, reviewer, game_round, review="valid"):
+        return reviewer.post(
+            f"/room/{self.room.code}/round/{game_round.pk}/review/",
+            {"review": review},
+        )
+
     def test_round_flow_alternates_turn_and_records_answer(self):
         self.configure_game()
         self.add_prompts()
@@ -99,8 +109,16 @@ class GameFlowTests(TestCase):
 
         self.assertEqual(game_round.answer_text, "A test answer")
         self.assertEqual(game_round.answer_type, "text")
+        self.assertEqual(game_round.review_status, "pending")
+        self.assertEqual(self.room.phase, "REVIEWING_ANSWER")
+        self.assertEqual(self.room.current_turn, self.guest)
+
+        self.review_round(self.guest_client, game_round)
+        self.room.refresh_from_db()
+        game_round.refresh_from_db()
         self.assertEqual(self.room.phase, "CHOOSING_TYPE")
         self.assertEqual(self.room.current_turn, self.guest)
+        self.assertEqual(game_round.review_status, "accepted")
 
     def test_selected_prompt_is_not_offered_again_during_the_same_game(self):
         self.configure_game()
@@ -120,6 +138,10 @@ class GameFlowTests(TestCase):
             f"/room/{self.room.code}/answer/",
             {"answer": "A test answer"},
         )
+        self.review_round(
+            self.guest_client,
+            GameRound.objects.get(room=self.room, round_number=1),
+        )
 
         # The host has not selected this prompt, so it remains available to them.
         self.guest_client.post(
@@ -135,6 +157,10 @@ class GameFlowTests(TestCase):
         self.guest_client.post(
             f"/room/{self.room.code}/answer/",
             {"answer": "Another test answer"},
+        )
+        self.review_round(
+            self.host_client,
+            GameRound.objects.get(room=self.room, round_number=2),
         )
 
         # After the guest has selected it too, it is no longer offered to them.
@@ -155,6 +181,10 @@ class GameFlowTests(TestCase):
             f"/room/{self.room.code}/answer/",
             {"answer": "A third test answer"},
         )
+        self.review_round(
+            self.guest_client,
+            GameRound.objects.get(room=self.room, round_number=3),
+        )
         self.guest_client.post(
             f"/room/{self.room.code}/type/",
             {"prompt_type": "truth"},
@@ -162,6 +192,203 @@ class GameFlowTests(TestCase):
         self.room.refresh_from_db()
         self.assertEqual(len(self.room.prompt_options), 2)
         self.assertNotIn(chosen_prompt_id, self.room.prompt_options)
+
+    def test_only_the_other_player_can_review_and_rejection_costs_answerer_a_heart(self):
+        self.room.phase = "REVIEWING_ANSWER"
+        self.room.current_turn = self.guest
+        self.room.save(update_fields=["phase", "current_turn"])
+        self.host.hearts = 1
+        self.host.save(update_fields=["hearts"])
+        game_round = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="A prompt",
+            prompt_type="truth",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="An answer",
+            answer_type="text",
+        )
+
+        wrong_reviewer = self.host_client.post(
+            f"/room/{self.room.code}/round/{game_round.pk}/review/",
+            {"review": "unsatisfying"},
+            follow=True,
+        )
+        self.assertEqual(wrong_reviewer.status_code, 200)
+        self.host.refresh_from_db()
+        self.assertEqual(self.host.hearts, 1)
+        self.room.refresh_from_db()
+        self.assertEqual(self.room.phase, "REVIEWING_ANSWER")
+
+        response = self.review_round(
+            self.guest_client,
+            game_round,
+            review="unsatisfying",
+        )
+        self.assertRedirects(
+            response,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        self.room.refresh_from_db()
+        self.host.refresh_from_db()
+        game_round.refresh_from_db()
+        self.assertEqual(self.host.hearts, 0)
+        self.assertEqual(self.room.phase, "FINISHED")
+        self.assertEqual(self.room.status, "FINISHED")
+        self.assertEqual(self.room.winner, self.guest)
+        self.assertEqual(game_round.review_status, "rejected")
+
+    def test_new_game_resets_hearts_after_a_winner_is_declared(self):
+        self.room.phase = "FINISHED"
+        self.room.status = "FINISHED"
+        self.room.winner = self.guest
+        self.room.save(update_fields=["phase", "status", "winner"])
+        self.host.hearts = 0
+        self.host.save(update_fields=["hearts"])
+        self.guest.hearts = 3
+        self.guest.save(update_fields=["hearts"])
+
+        self.host_client.post(f"/room/{self.room.code}/new-game/")
+
+        self.room.refresh_from_db()
+        self.host.refresh_from_db()
+        self.guest.refresh_from_db()
+        self.assertEqual(self.room.phase, "CHOOSING_CATEGORY")
+        self.assertEqual(self.room.status, "ACTIVE")
+        self.assertIsNone(self.room.winner)
+        self.assertEqual(self.host.hearts, 5)
+        self.assertEqual(self.guest.hearts, 5)
+
+    def test_unsatisfying_answer_costs_one_heart_and_advances_the_game(self):
+        self.room.phase = "REVIEWING_ANSWER"
+        self.room.current_turn = self.guest
+        self.room.save(update_fields=["phase", "current_turn"])
+        game_round = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="A prompt",
+            prompt_type="truth",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="An answer",
+            answer_type="text",
+        )
+
+        self.review_round(
+            self.guest_client,
+            game_round,
+            review="unsatisfying",
+        )
+
+        self.room.refresh_from_db()
+        self.host.refresh_from_db()
+        self.assertEqual(self.host.hearts, 4)
+        self.assertEqual(self.room.phase, "CHOOSING_TYPE")
+        self.assertEqual(self.room.current_turn, self.guest)
+
+    @patch("games.views.cloudinary_is_configured", return_value=True)
+    @patch(
+        "games.views.cloudinary.uploader.upload",
+        return_value={
+            "public_id": "truth-dare/proofs/test-proof",
+            "version": 123,
+            "format": "png",
+        },
+    )
+    def test_dare_proof_upload_uses_authenticated_cloudinary_storage(
+        self,
+        upload,
+        _configured,
+    ):
+        self.room.phase = "AWAITING_ANSWER"
+        self.room.current_turn = self.host
+        self.room.game_type = "friends"
+        self.room.difficulty = "easy"
+        self.room.save(
+            update_fields=[
+                "phase",
+                "current_turn",
+                "game_type",
+                "difficulty",
+            ]
+        )
+        dare = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="Do a dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+        )
+        proof = SimpleUploadedFile(
+            "proof.png",
+            b"\x89PNG\r\n\x1a\n" + b"\x00" * 24,
+            content_type="image/png",
+        )
+
+        response = self.host_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "Done!", "proof_image": proof},
+        )
+
+        self.assertRedirects(
+            response,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        dare.refresh_from_db()
+        self.room.refresh_from_db()
+        self.assertEqual(dare.proof_public_id, "truth-dare/proofs/test-proof")
+        self.assertEqual(dare.proof_version, 123)
+        self.assertEqual(dare.proof_format, "png")
+        self.assertEqual(dare.answer_type, "media")
+        self.assertEqual(self.room.phase, "REVIEWING_ANSWER")
+        self.assertEqual(upload.call_args.kwargs["type"], "authenticated")
+        self.assertEqual(upload.call_args.kwargs["resource_type"], "image")
+
+    def test_proof_is_one_time_for_each_player_and_not_available_to_nonplayers(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="Done",
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-proof",
+            proof_version=123,
+            proof_format="png",
+        )
+        url = f"/room/{self.room.code}/round/{game_round.pk}/proof/"
+        image_response = HttpResponse(b"image-bytes", content_type="image/png")
+        with patch("games.views.cloudinary_is_configured", return_value=True):
+            with patch(
+                "games.views.get_proof_image_response",
+                return_value=image_response,
+            ) as get_image:
+                first_view = self.host_client.post(url)
+                self.assertEqual(first_view.status_code, 200)
+                self.assertEqual(first_view.content, b"image-bytes")
+                self.assertEqual(first_view["Cache-Control"], "private, no-store")
+
+                repeated_view = self.host_client.post(url)
+                self.assertEqual(repeated_view.status_code, 410)
+
+                other_player_view = self.guest_client.post(url)
+                self.assertEqual(other_player_view.status_code, 200)
+
+                forbidden_view = Client().post(url)
+                self.assertEqual(forbidden_view.status_code, 403)
+
+        self.assertEqual(get_image.call_count, 2)
+        self.assertEqual(AnswerProofView.objects.filter(game_round=game_round).count(), 2)
 
     def test_exhausted_game_can_restart_without_erasing_history(self):
         self.room.game_type = "friends"
@@ -701,7 +928,7 @@ class GameFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Service-Worker-Allowed"], "/")
-        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v11"')
+        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v12"')
         self.assertContains(response, "event.request.mode === \"navigate\"")
         self.assertContains(response, "fetch(event.request).catch")
         self.assertNotContains(response, "cache.put(event.request")
@@ -914,6 +1141,78 @@ class ManagementDashboardTests(TestCase):
         self.assertContains(response, "A saved web answer")
         self.assertContains(response, "Guest selected")
         self.assertContains(response, "Host challenged")
+
+    def test_staff_room_history_displays_proof_images_without_player_view_limits(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="Done",
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-proof",
+            proof_version=123,
+            proof_format="png",
+        )
+        self.client.force_login(self.admin_user)
+
+        with patch("games.views.cloudinary_is_configured", return_value=True):
+            with patch(
+                "games.views.get_proof_image_response",
+                return_value=HttpResponse(
+                    b"proof-image",
+                    content_type="image/png",
+                ),
+            ) as get_image:
+                response = self.client.get(
+                    f"/management/rooms/{self.room.code}/",
+                )
+                proof_url = (
+                    f"/management/rooms/{self.room.code}/"
+                    f"round/{game_round.pk}/proof/"
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, proof_url)
+
+                first_view = self.client.get(proof_url)
+                second_view = self.client.get(proof_url)
+
+        self.assertEqual(first_view.status_code, 200)
+        self.assertEqual(second_view.status_code, 200)
+        self.assertEqual(first_view.content, b"proof-image")
+        self.assertEqual(second_view.content, b"proof-image")
+        self.assertEqual(get_image.call_count, 2)
+        self.assertFalse(
+            AnswerProofView.objects.filter(game_round=game_round).exists(),
+        )
+
+    def test_management_proof_image_requires_staff_login(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="Done",
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-proof",
+            proof_version=123,
+            proof_format="png",
+        )
+
+        response = self.client.get(
+            f"/management/rooms/{self.room.code}/round/{game_round.pk}/proof/",
+        )
+
+        self.assertRedirects(
+            response,
+            f"/admin/login/?next=/management/rooms/{self.room.code}/"
+            f"round/{game_round.pk}/proof/",
+            fetch_redirect_response=False,
+        )
 
     def test_staff_user_can_view_room_conversation_in_message_order(self):
         RoomMessage.objects.create(

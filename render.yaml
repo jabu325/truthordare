@@ -17,3 +17,5 @@ services:
         sync: false
       - key: DATABASE_URL_UNPOOLED
         sync: false
+      - key: CLOUDINARY_URL
+        sync: false

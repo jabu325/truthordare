@@ -40,6 +40,7 @@ class GameRoundInline(admin.TabularInline):
         "prompt_type",
         "answer_text",
         "answer_type",
+        "review_status",
         "created_at",
     )
 
@@ -76,10 +77,11 @@ class GameRoundAdmin(admin.ModelAdmin):
         "round_number",
         "prompt_type",
         "answer_type",
+        "review_status",
         "created_at",
     )
 
-    list_filter = ("prompt_type", "answer_type")
+    list_filter = ("prompt_type", "answer_type", "review_status")
 
 
 @admin.register(RoomMessage)

@@ -91,6 +91,20 @@ deployed hostname. Serve the app over HTTPS for PWA installation. The web
 app includes a Render deployment configuration; use persistent PostgreSQL
 storage rather than relying on an ephemeral host filesystem for game data.
 
+### Cloudinary proof images
+
+Create a Cloudinary account and set its `CLOUDINARY_URL` value in
+`web/.env.local` for local development and in the Render service's environment
+for production.
+Treat this value as a secret. Dare proof images upload to authenticated
+Cloudinary storage; the app does not expose the Cloudinary delivery URL. Each
+player can request the proof once through the game, though this cannot prevent
+screenshots or saving an image after it has been displayed.
+
+Image proof is optional and limited to 5 MB per image. The other player must
+review every answer with a thumbs up or thumbs down. A thumbs-down costs the
+answering player one of five hearts; losing all hearts ends the game.
+
 ### Deploying on Render
 
 The repository includes a Render Blueprint in `render.yaml`. In Render, create
