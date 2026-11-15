@@ -560,7 +560,9 @@ textarea:focus-visible {
 }
 
 .room-heading-actions {
-    display: flex;
+    display: grid;
+    grid-auto-columns: max-content;
+    grid-auto-flow: column;
     flex: 0 0 auto;
     align-items: center;
     gap: 7px;
@@ -1514,6 +1516,28 @@ textarea:focus-visible {
 .room-floating-actions .install-app-button {
     margin: 0;
     box-shadow: 0 7px 24px rgb(0 0 0 / 45%);
+}
+
+.room-notification-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.push-notification-status {
+    max-width: 280px;
+    margin: 0;
+    padding: 8px 10px;
+    color: #f5dce7;
+    background: #21121c;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: right;
+}
+
+.push-notification-status[hidden] {
+    display: none;
 }
 
 .room-chat-toggle,

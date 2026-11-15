@@ -109,12 +109,25 @@ the answering player one of five hearts; losing all hearts ends the game.
 Either player can request a restart at any time; both players must confirm
 before the fresh setup begins. Earlier rounds remain in the room history.
 
+### Background turn notifications
+
+Players can enable browser push notifications from a room. To configure push
+delivery, generate a VAPID key pair with `npx web-push generate-vapid-keys`,
+then set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` in
+`web/.env.local` for development and in the Render service environment for
+production. Use a contact value such as `mailto:you@example.com` for
+`VAPID_SUBJECT`, and keep `VAPID_PRIVATE_KEY` secret. Players enable alerts in
+their room and grant browser permission. Background notifications require HTTPS
+and a browser that supports Web Push; on iPhone or iPad, the app must be added
+to the Home Screen.
+
 ### Deploying on Render
 
 The repository includes a Render Blueprint in `render.yaml`. In Render, create
-a new Blueprint from this repository and provide `DATABASE_URL` and
-`DATABASE_URL_UNPOOLED` when prompted. Set `DATABASE_URL` to the pooled
-PostgreSQL connection URL for normal web traffic and `DATABASE_URL_UNPOOLED` to
+a new Blueprint from this repository and provide `DATABASE_URL`,
+`DATABASE_URL_UNPOOLED`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+`VAPID_SUBJECT`, and `CLOUDINARY_URL` when prompted. Set `DATABASE_URL` to the
+pooled PostgreSQL connection URL for normal web traffic and `DATABASE_URL_UNPOOLED` to
 the direct connection URL for startup migrations. The Blueprint installs the
 web requirements, collects static files during the build, applies migrations
 using the direct connection, and launches Django through Gunicorn using the

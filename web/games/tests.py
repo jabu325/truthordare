@@ -1,8 +1,9 @@
 from datetime import timedelta
+import hashlib
 import json
 from pathlib import Path
 
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import HttpResponse
 from django.utils import timezone
@@ -15,9 +16,14 @@ from .models import (
     GameRound,
     Player,
     Prompt,
+    PushSubscription,
     RoomMessage,
 )
-from .views import get_proof_media_response, is_supported_proof_video
+from .views import (
+    get_action_player_id,
+    get_proof_media_response,
+    is_supported_proof_video,
+)
 
 
 class GameFlowTests(TestCase):
@@ -1391,12 +1397,140 @@ class GameFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_player_can_register_and_remove_a_push_subscription(self):
+        url = f"/room/{self.room.code}/notifications/"
+        subscription = {
+            "endpoint": "https://fcm.googleapis.com/fcm/send/test-endpoint",
+            "keys": {
+                "p256dh": "public-key",
+                "auth": "auth-key",
+            },
+        }
+
+        registered = self.host_client.post(
+            url,
+            data=json.dumps(subscription),
+            content_type="application/json",
+        )
+        self.assertEqual(registered.status_code, 201)
+        self.assertEqual(PushSubscription.objects.count(), 1)
+
+        repeated = self.host_client.post(
+            url,
+            data=json.dumps(subscription),
+            content_type="application/json",
+        )
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(PushSubscription.objects.count(), 1)
+
+        unauthorized_removal = self.guest_client.post(
+            url,
+            data=json.dumps({
+                "action": "unsubscribe",
+                "endpoint": subscription["endpoint"],
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(unauthorized_removal.status_code, 200)
+        self.assertEqual(PushSubscription.objects.count(), 1)
+
+        removed = self.host_client.post(
+            url,
+            data=json.dumps({
+                "action": "unsubscribe",
+                "endpoint": subscription["endpoint"],
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(removed.status_code, 200)
+        self.assertEqual(PushSubscription.objects.count(), 0)
+
+    def test_push_subscription_rejects_untrusted_endpoints(self):
+        response = self.host_client.post(
+            f"/room/{self.room.code}/notifications/",
+            data=json.dumps({
+                "endpoint": "https://127.0.0.1/admin/",
+                "keys": {"p256dh": "key", "auth": "key"},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(PushSubscription.objects.count(), 0)
+
+    def test_turn_actor_matches_the_current_action_phase(self):
+        self.room.host = self.host
+        self.room.current_turn = self.guest
+
+        for phase in ("CHOOSING_CATEGORY", "CHOOSING_DIFFICULTY"):
+            self.room.phase = phase
+            self.assertEqual(get_action_player_id(self.room), self.host.pk)
+
+        for phase in ("CHOOSING_TYPE", "AWAITING_ANSWER", "REVIEWING_ANSWER"):
+            self.room.phase = phase
+            self.assertEqual(get_action_player_id(self.room), self.guest.pk)
+
+        self.room.phase = "CHOOSING_PROMPT"
+        self.assertEqual(get_action_player_id(self.room), self.host.pk)
+
+        self.room.phase = "FINISHED"
+        self.assertIsNone(get_action_player_id(self.room))
+
+    @override_settings(
+        VAPID_PUBLIC_KEY="public-key",
+        VAPID_PRIVATE_KEY="private-key",
+        VAPID_SUBJECT="mailto:test@example.com",
+    )
+    def test_turn_change_sends_push_to_prompt_selector(self):
+        self.configure_game()
+        self.add_prompts(prompt_type="dare")
+        endpoint = "https://fcm.googleapis.com/fcm/send/guest-endpoint"
+        PushSubscription.objects.create(
+            player=self.guest,
+            endpoint=endpoint,
+            endpoint_hash=hashlib.sha256(endpoint.encode()).hexdigest(),
+            p256dh="public-key",
+            auth="auth-key",
+        )
+
+        with patch("games.views.webpush") as send_push:
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                response = self.host_client.post(
+                    f"/room/{self.room.code}/type/",
+                    {"prompt_type": "dare"},
+                )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(callbacks), 1)
+        send_push.assert_called_once()
+        push_args = send_push.call_args.kwargs
+        self.assertEqual(push_args["subscription_info"]["endpoint"], endpoint)
+        notification = json.loads(push_args["data"])
+        self.assertEqual(
+            notification["body"],
+            "It's your turn to play, Guest.",
+        )
+        self.assertEqual(notification["url"], f"/room/{self.room.code}/")
+
+    @override_settings(
+        VAPID_PUBLIC_KEY="public-key",
+        VAPID_PRIVATE_KEY="private-key",
+        VAPID_SUBJECT="mailto:test@example.com",
+    )
+    def test_room_page_renders_turn_notification_controls(self):
+        response = self.host_client.get(f"/room/{self.room.code}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enable turn alerts")
+        self.assertContains(response, "push-config")
+        self.assertContains(response, "turn-notifications.js")
+
     def test_service_worker_allows_root_scope_and_avoids_private_page_caching(self):
         response = Client().get("/service-worker.js")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Service-Worker-Allowed"], "/")
-        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v16"')
+        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v18"')
         self.assertContains(response, "event.request.mode === \"navigate\"")
         self.assertContains(response, "fetch(event.request).catch")
         self.assertNotContains(response, "cache.put(event.request")

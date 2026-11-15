@@ -29,6 +29,10 @@ SECRET_KEY = os.getenv("SECRET_KEY", "development-only-key")
 
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "").strip()
+
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv("ALLOWED_HOSTS", "localhost").split(",")

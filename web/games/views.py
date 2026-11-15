@@ -1,7 +1,10 @@
+import hashlib
+import json
 import logging
 import secrets
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
@@ -11,6 +14,7 @@ import cloudinary.uploader
 from cloudinary.utils import cloudinary_url
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import messages
+from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -20,6 +24,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
+from pywebpush import WebPushException, webpush
 
 from .constants import PROMPT_CATEGORY_ALIASES
 from .models import (
@@ -29,6 +34,7 @@ from .models import (
     GameRound,
     Player,
     Prompt,
+    PushSubscription,
     RoomMessage,
 )
 
@@ -239,6 +245,124 @@ def get_room_state(room, players=None, current_round=None):
         ),
         "latest_round": latest_round,
     }
+
+
+def get_action_player_id(room):
+    if room.phase in {"CHOOSING_CATEGORY", "CHOOSING_DIFFICULTY"}:
+        return room.host_id
+    if room.phase == "CHOOSING_PROMPT":
+        if room.current_turn_id is None:
+            return None
+        return (
+            room.players.exclude(pk=room.current_turn_id)
+            .values_list("pk", flat=True)
+            .first()
+        )
+    if room.phase in {"CHOOSING_TYPE", "AWAITING_ANSWER", "REVIEWING_ANSWER"}:
+        return room.current_turn_id
+    return None
+
+
+def send_turn_notification(room_id):
+    if not (
+        settings.VAPID_PUBLIC_KEY
+        and settings.VAPID_PRIVATE_KEY
+        and settings.VAPID_SUBJECT
+    ):
+        return
+
+    room = GameRoom.objects.filter(pk=room_id).first()
+    if room is None:
+        return
+    player_id = get_action_player_id(room)
+    if player_id is None:
+        return
+
+    player = Player.objects.filter(pk=player_id).first()
+    if player is None:
+        return
+
+    payload = json.dumps({
+        "title": "Your turn in Truth or Dare",
+        "body": f"It's your turn to play, {player.nickname}.",
+        "url": reverse("games:room", kwargs={"code": room.code}),
+        "tag": f"turn-{room.code}",
+    })
+    for subscription in player.push_subscriptions.all():
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": subscription.endpoint,
+                    "keys": {
+                        "p256dh": subscription.p256dh,
+                        "auth": subscription.auth,
+                    },
+                },
+                data=payload,
+                vapid_private_key=settings.VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": settings.VAPID_SUBJECT},
+                ttl=3600,
+                timeout=5,
+            )
+        except WebPushException as error:
+            status_code = (
+                error.response.status_code
+                if error.response is not None
+                else None
+            )
+            if status_code in {404, 410}:
+                subscription.delete()
+                logger.info(
+                    "Removed expired push subscription %s for player %s.",
+                    subscription.pk,
+                    player.pk,
+                )
+            else:
+                logger.exception(
+                    "Could not send a turn notification to player %s in room %s.",
+                    player.pk,
+                    room.code,
+                )
+        except ValueError:
+            logger.exception(
+                "Could not send a turn notification to player %s in room %s because the push configuration or subscription is invalid.",
+                player.pk,
+                room.code,
+            )
+
+
+def queue_turn_notification(room):
+    transaction.on_commit(
+        lambda room_id=room.pk: send_turn_notification(room_id)
+    )
+
+
+def is_supported_push_endpoint(endpoint):
+    try:
+        parsed = urlsplit(endpoint)
+        hostname = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port
+    except ValueError:
+        return False
+
+    supported_host = (
+        hostname == "fcm.googleapis.com"
+        or hostname == "push.services.mozilla.com"
+        or hostname.endswith(".push.services.mozilla.com")
+        or hostname == "push.apple.com"
+        or hostname.endswith(".push.apple.com")
+        or hostname == "notify.windows.com"
+        or hostname.endswith(".notify.windows.com")
+    )
+    return (
+        parsed.scheme == "https"
+        and bool(hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and port in {None, 443}
+        and not parsed.fragment
+        and supported_host
+    )
 
 
 def cloudinary_is_configured():
@@ -605,6 +729,7 @@ def join_room(request):
         room.status = "ACTIVE"
         room.phase = "CHOOSING_CATEGORY"
         room.save(update_fields=["status", "phase"])
+        queue_turn_notification(room)
 
     store_player_token(request, room, player)
 
@@ -737,6 +862,23 @@ def room_detail(request, code):
             "reaction_state": reaction_state,
             "reaction_choices": AnswerReaction.EMOJI_CHOICES,
             "cloudinary_available": cloudinary_is_configured(),
+            "push_notifications_enabled": bool(
+                settings.VAPID_PUBLIC_KEY
+                and settings.VAPID_PRIVATE_KEY
+                and settings.VAPID_SUBJECT
+            ),
+            "push_config": {
+                "enabled": bool(
+                    settings.VAPID_PUBLIC_KEY
+                    and settings.VAPID_PRIVATE_KEY
+                    and settings.VAPID_SUBJECT
+                ),
+                "public_key": settings.VAPID_PUBLIC_KEY,
+                "subscription_url": reverse(
+                    "games:push_subscription",
+                    kwargs={"code": room.code},
+                ),
+            },
             "prompt_availability": (
                 get_prompt_availability(
                     room,
@@ -799,6 +941,73 @@ def heartbeat(request, code):
             player,
         ),
     })
+
+
+@require_POST
+def push_subscription(request, code):
+    room = get_object_or_404(GameRoom, code=code.upper())
+    player = get_room_player(request, room)
+    if player is None:
+        return JsonResponse(
+            {"error": "You don't have access to this room."},
+            status=403,
+        )
+    if len(request.body) > 8192:
+        return JsonResponse({"error": "Invalid subscription data."}, status=400)
+
+    try:
+        payload = json.loads(request.body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse({"error": "Invalid subscription data."}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"error": "Invalid subscription data."}, status=400)
+
+    endpoint = payload.get("endpoint")
+    if (
+        not isinstance(endpoint, str)
+        or len(endpoint) > 4096
+        or not is_supported_push_endpoint(endpoint)
+    ):
+        return JsonResponse(
+            {"error": "Unsupported push subscription endpoint."},
+            status=400,
+        )
+
+    if payload.get("action") == "unsubscribe":
+        PushSubscription.objects.filter(
+            player=player,
+            endpoint_hash=hashlib.sha256(endpoint.encode()).hexdigest(),
+        ).delete()
+        return JsonResponse({"subscribed": False})
+
+    keys = payload.get("keys")
+    if not isinstance(keys, dict):
+        return JsonResponse({"error": "Invalid subscription keys."}, status=400)
+    p256dh = keys.get("p256dh")
+    auth = keys.get("auth")
+    if (
+        not isinstance(p256dh, str)
+        or not p256dh
+        or len(p256dh) > 256
+        or not isinstance(auth, str)
+        or not auth
+        or len(auth) > 256
+    ):
+        return JsonResponse({"error": "Invalid subscription keys."}, status=400)
+
+    _subscription, created = PushSubscription.objects.update_or_create(
+        player=player,
+        endpoint_hash=hashlib.sha256(endpoint.encode()).hexdigest(),
+        defaults={
+            "endpoint": endpoint,
+            "p256dh": p256dh,
+            "auth": auth,
+        },
+    )
+    return JsonResponse(
+        {"subscribed": True},
+        status=201 if created else 200,
+    )
 
 
 @require_POST
@@ -964,6 +1173,7 @@ def configure_category(request, code):
         room.game_type = category
         room.phase = "CHOOSING_DIFFICULTY"
         room.save(update_fields=["game_type", "phase"])
+        queue_turn_notification(room)
 
     return redirect("games:room", code=code)
 
@@ -1011,6 +1221,7 @@ def configure_difficulty(request, code):
                 "started_at",
             ]
         )
+        queue_turn_notification(room)
 
     return redirect("games:room", code=code)
 
@@ -1074,6 +1285,7 @@ def start_new_game(request, code):
                         "finished_at",
                     ]
                 )
+                queue_turn_notification(room)
                 messages.success(
                     request,
                     "Both players agreed. A fresh game is ready!",
@@ -1134,6 +1346,7 @@ def choose_type(request, code):
         room.prompt_options = [prompt.id for prompt in prompts]
         room.phase = "CHOOSING_PROMPT"
         room.save(update_fields=["prompt_options", "phase"])
+        queue_turn_notification(room)
 
     return redirect("games:room", code=code)
 
@@ -1189,6 +1402,7 @@ def choose_prompt(request, code):
         room.prompt_options = []
         room.phase = "AWAITING_ANSWER"
         room.save(update_fields=["prompt_options", "phase"])
+        queue_turn_notification(room)
 
     return redirect("games:room", code=code)
 
@@ -1314,6 +1528,7 @@ def submit_answer(request, code):
         room.current_turn = next_player
         room.phase = "REVIEWING_ANSWER"
         room.save(update_fields=["current_turn", "phase"])
+        queue_turn_notification(room)
 
     return redirect("games:room", code=code)
 
@@ -1385,9 +1600,11 @@ def review_answer(request, code, round_id):
             else:
                 room.phase = "CHOOSING_TYPE"
                 room.save(update_fields=["phase"])
+                queue_turn_notification(room)
         else:
             room.phase = "CHOOSING_TYPE"
             room.save(update_fields=["phase"])
+            queue_turn_notification(room)
 
     return redirect("games:room", code=code)
 

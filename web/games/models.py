@@ -217,6 +217,31 @@ class Player(models.Model):
         return f"{self.nickname} ({self.room.code})"
 
 
+class PushSubscription(models.Model):
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.CASCADE,
+        related_name="push_subscriptions",
+    )
+    endpoint = models.TextField()
+    endpoint_hash = models.CharField(max_length=64)
+    p256dh = models.CharField(max_length=256)
+    auth = models.CharField(max_length=256)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["player", "endpoint_hash"],
+                name="unique_push_endpoint_per_player",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Push subscription for {self.player}"
+
+
 class GameRound(models.Model):
 
     ANSWER_TYPES = [

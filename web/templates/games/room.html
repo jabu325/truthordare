@@ -59,6 +59,19 @@
         </header>
 
         <nav class="room-floating-actions" aria-label="Room tools">
+            {% if push_notifications_enabled %}
+                <button class="install-app-button room-notification-toggle" type="button" data-turn-notification-toggle>
+                    <span aria-hidden="true">🔔</span> Enable turn alerts
+                </button>
+                <p class="push-notification-status" data-turn-notification-status role="status" aria-live="polite" hidden></p>
+            {% else %}
+                <button class="install-app-button room-notification-toggle" type="button" disabled>
+                    <span aria-hidden="true">🔔</span> Turn alerts unavailable
+                </button>
+                <p class="push-notification-status" role="status">
+                    Background turn alerts need VAPID keys configured on the server.
+                </p>
+            {% endif %}
             <button class="install-app-button room-chat-toggle" type="button" data-chat-open data-unread-count="{{ unread_count }}" aria-label="Open room chat{% if unread_count %}; {{ unread_count }} unread message{{ unread_count|pluralize }}{% endif %}" aria-expanded="false" aria-controls="room-chat-drawer">
                 <span aria-hidden="true">💬</span> Chat
                 <span class="chat-unread-badge" data-chat-badge {% if not unread_count %}hidden{% endif %} aria-hidden="true">{{ unread_count }}</span>
@@ -514,6 +527,7 @@
     {{ room_state|json_script:"room-state" }}
     {{ room_messages|json_script:"room-messages" }}
     {{ reaction_state|json_script:"reaction-state" }}
+    {{ push_config|json_script:"push-config" }}
     <script src="{% static 'games/pwa.js' %}" defer></script>
     <script src="{% static 'games/invite.js' %}" defer></script>
     <script src="{% static 'games/conversation.js' %}" defer></script>
@@ -521,5 +535,6 @@
     <script src="{% static 'games/proof.js' %}" defer></script>
     <script src="{% static 'games/room-navigation.js' %}" defer></script>
     <script src="{% static 'games/presence.js' %}" defer></script>
+    <script src="{% static 'games/turn-notifications.js' %}" defer></script>
 </body>
 </html>
