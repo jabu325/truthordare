@@ -71,11 +71,21 @@
                     {% if round.proof_public_id %}
                         <div class="management-proof">
                             <span class="management-field-label">DARE PROOF</span>
-                            <img
-                                src="{% url 'games:management_answer_proof' room.code round.pk %}"
-                                alt="Dare proof for game {{ round.game_number }}, round {{ round.round_number }}"
-                                loading="lazy"
-                            >
+                            {% if round.proof_resource_type == "video" %}
+                                <video controls preload="metadata">
+                                    <source
+                                        src="{% url 'games:management_answer_proof' room.code round.pk %}"
+                                        type="video/{{ round.proof_format }}"
+                                    >
+                                    Your browser does not support video playback.
+                                </video>
+                            {% else %}
+                                <img
+                                    src="{% url 'games:management_answer_proof' room.code round.pk %}"
+                                    alt="Dare proof for game {{ round.game_number }}, round {{ round.round_number }}"
+                                    loading="lazy"
+                                >
+                            {% endif %}
                         </div>
                     {% endif %}
                 </article>

@@ -6,7 +6,7 @@ from django.test import Client, TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import HttpResponse
 from django.utils import timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from .models import (
     AnswerReaction,
@@ -17,6 +17,7 @@ from .models import (
     Prompt,
     RoomMessage,
 )
+from .views import get_proof_media_response, is_supported_proof_video
 
 
 class GameFlowTests(TestCase):
@@ -256,11 +257,22 @@ class GameFlowTests(TestCase):
         self.room.refresh_from_db()
         self.host.refresh_from_db()
         self.guest.refresh_from_db()
+        self.assertEqual(self.room.phase, "FINISHED")
+        self.assertEqual(self.host.hearts, 0)
+        self.assertTrue(self.host.restart_requested)
+
+        self.guest_client.post(f"/room/{self.room.code}/new-game/")
+
+        self.room.refresh_from_db()
+        self.host.refresh_from_db()
+        self.guest.refresh_from_db()
         self.assertEqual(self.room.phase, "CHOOSING_CATEGORY")
         self.assertEqual(self.room.status, "ACTIVE")
         self.assertIsNone(self.room.winner)
         self.assertEqual(self.host.hearts, 5)
         self.assertEqual(self.guest.hearts, 5)
+        self.assertFalse(self.host.restart_requested)
+        self.assertFalse(self.guest.restart_requested)
 
     def test_unsatisfying_answer_costs_one_heart_and_advances_the_game(self):
         self.room.phase = "REVIEWING_ANSWER"
@@ -351,6 +363,254 @@ class GameFlowTests(TestCase):
         self.assertEqual(upload.call_args.kwargs["type"], "authenticated")
         self.assertEqual(upload.call_args.kwargs["resource_type"], "image")
 
+    @patch("games.views.cloudinary_is_configured", return_value=True)
+    @patch(
+        "games.views.cloudinary.uploader.upload",
+        return_value={
+            "public_id": "truth-dare/proofs/image-only",
+            "version": 124,
+            "format": "png",
+        },
+    )
+    def test_dare_proof_image_can_be_submitted_without_text(
+        self,
+        upload,
+        _configured,
+    ):
+        self.room.phase = "AWAITING_ANSWER"
+        self.room.current_turn = self.host
+        self.room.game_type = "friends"
+        self.room.difficulty = "easy"
+        self.room.save(
+            update_fields=[
+                "phase",
+                "current_turn",
+                "game_type",
+                "difficulty",
+            ]
+        )
+        dare = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="Do a dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+        )
+        proof = SimpleUploadedFile(
+            "proof.png",
+            b"\x89PNG\r\n\x1a\n" + b"\x00" * 24,
+            content_type="image/png",
+        )
+
+        response = self.host_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "", "proof_image": proof},
+        )
+
+        self.assertRedirects(
+            response,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        dare.refresh_from_db()
+        self.assertEqual(dare.answer_text, "")
+        self.assertEqual(dare.answer_type, "media")
+        self.assertEqual(dare.proof_public_id, "truth-dare/proofs/image-only")
+        self.assertEqual(upload.call_count, 1)
+
+    @patch("games.views.cloudinary_is_configured", return_value=True)
+    @patch(
+        "games.views.cloudinary.uploader.upload",
+        return_value={
+            "public_id": "truth-dare/proofs/test-video",
+            "version": 125,
+            "format": "mp4",
+        },
+    )
+    def test_dare_video_proof_upload_uses_authenticated_video_storage(
+        self,
+        upload,
+        _configured,
+    ):
+        self.room.phase = "AWAITING_ANSWER"
+        self.room.current_turn = self.host
+        self.room.save(update_fields=["phase", "current_turn"])
+        dare = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="Do a dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+        )
+        video = SimpleUploadedFile(
+            "proof.mp4",
+            b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24,
+            content_type="video/mp4",
+        )
+
+        response = self.host_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "Done!", "proof_media": video},
+        )
+
+        self.assertRedirects(
+            response,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        dare.refresh_from_db()
+        self.assertEqual(dare.answer_type, "media")
+        self.assertEqual(dare.proof_resource_type, "video")
+        self.assertEqual(dare.proof_public_id, "truth-dare/proofs/test-video")
+        self.assertEqual(upload.call_args.kwargs["resource_type"], "video")
+        self.assertEqual(upload.call_args.kwargs["type"], "authenticated")
+
+    def test_dare_video_proof_rejects_unsupported_media_type(self):
+        self.room.phase = "AWAITING_ANSWER"
+        self.room.current_turn = self.host
+        self.room.save(update_fields=["phase", "current_turn"])
+        dare = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="Do a dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+        )
+        invalid_video = SimpleUploadedFile(
+            "proof.mp4",
+            b"not a video",
+            content_type="video/mp4",
+        )
+
+        response = self.host_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "Done!", "proof_media": invalid_video},
+            follow=True,
+        )
+
+        dare.refresh_from_db()
+        self.assertEqual(dare.answer_type, "pending")
+        self.assertContains(response, "MP4 or WebM video up to 25 MB")
+
+    def test_video_proof_upload_enforces_the_25_mb_limit(self):
+        video = SimpleUploadedFile(
+            "proof.mp4",
+            b"\x00\x00\x00\x18ftypisom",
+            content_type="video/mp4",
+        )
+
+        with patch("games.views.MAX_PROOF_VIDEO_SIZE", 8):
+            self.assertFalse(is_supported_proof_video(video))
+
+    def test_webm_video_signature_is_supported(self):
+        video = SimpleUploadedFile(
+            "proof.webm",
+            b"\x1a\x45\xdf\xa3\x9f\x42\x82\x84webm",
+            content_type="video/webm",
+        )
+
+        self.assertTrue(is_supported_proof_video(video))
+
+    def test_video_proof_delivery_uses_signed_cloudinary_video_url(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="Done",
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-video",
+            proof_version=125,
+            proof_format="mp4",
+            proof_resource_type="video",
+        )
+        cloudinary_response = MagicMock()
+        cloudinary_response.__enter__.return_value = cloudinary_response
+        cloudinary_response.headers.get_content_type.return_value = "video/mp4"
+        cloudinary_response.read.return_value = b"video-data"
+
+        with patch(
+            "games.views.cloudinary_url",
+            return_value=("https://signed.example/video", {}),
+        ) as signed_url:
+            with patch(
+                "games.views.urlopen",
+                return_value=cloudinary_response,
+            ):
+                response = get_proof_media_response(game_round)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "video/mp4")
+        self.assertEqual(response.content, b"video-data")
+        self.assertEqual(
+            signed_url.call_args.kwargs["resource_type"],
+            "video",
+        )
+        cloudinary_response.headers.get_content_type.assert_called_once_with()
+        cloudinary_response.read.assert_called_once_with(25 * 1024 * 1024 + 1)
+
+    def test_answer_requires_text_or_proof(self):
+        self.room.phase = "AWAITING_ANSWER"
+        self.room.current_turn = self.host
+        self.room.save(update_fields=["phase", "current_turn"])
+        dare = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="Do a dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+        )
+
+        response = self.host_client.post(
+            f"/room/{self.room.code}/answer/",
+            {"answer": "  "},
+            follow=True,
+        )
+
+        dare.refresh_from_db()
+        self.assertEqual(dare.answer_type, "pending")
+        self.assertContains(
+            response,
+            "Enter a text answer or upload proof media.",
+        )
+
+    @patch("games.views.cloudinary_is_configured", return_value=True)
+    def test_dare_answer_form_allows_proof_without_text(self, _configured):
+        self.room.phase = "AWAITING_ANSWER"
+        self.room.current_turn = self.host
+        self.room.save(update_fields=["phase", "current_turn"])
+        GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="Do a dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+        )
+
+        response = self.host_client.get(f"/room/{self.room.code}/")
+
+        self.assertContains(
+            response,
+            "Type your answer, or attach proof media...",
+        )
+        self.assertNotRegex(
+            response.content.decode(),
+            r'<textarea[^>]*name="answer"[^>]*required',
+        )
+
     def test_proof_is_one_time_for_each_player_and_not_available_to_nonplayers(self):
         game_round = GameRound.objects.create(
             room=self.room,
@@ -370,7 +630,7 @@ class GameFlowTests(TestCase):
         image_response = HttpResponse(b"image-bytes", content_type="image/png")
         with patch("games.views.cloudinary_is_configured", return_value=True):
             with patch(
-                "games.views.get_proof_image_response",
+                "games.views.get_proof_media_response",
                 return_value=image_response,
             ) as get_image:
                 first_view = self.host_client.post(url)
@@ -390,7 +650,103 @@ class GameFlowTests(TestCase):
         self.assertEqual(get_image.call_count, 2)
         self.assertEqual(AnswerProofView.objects.filter(game_round=game_round).count(), 2)
 
-    def test_exhausted_game_can_restart_without_erasing_history(self):
+    def test_video_proof_is_only_delivered_once_to_each_player(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_text="Done",
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-video",
+            proof_version=125,
+            proof_format="mp4",
+            proof_resource_type="video",
+        )
+        url = f"/room/{self.room.code}/round/{game_round.pk}/proof/"
+        video_response = HttpResponse(b"video-data", content_type="video/mp4")
+        with patch("games.views.cloudinary_is_configured", return_value=True):
+            with patch(
+                "games.views.get_proof_media_response",
+                return_value=video_response,
+            ) as get_media:
+                first_view = self.host_client.post(url)
+                repeated_view = self.host_client.post(url)
+                other_player_view = self.guest_client.post(url)
+
+        self.assertEqual(first_view.status_code, 200)
+        self.assertEqual(first_view["Content-Type"], "video/mp4")
+        self.assertEqual(repeated_view.status_code, 410)
+        self.assertEqual(other_player_view.status_code, 200)
+        self.assertEqual(get_media.call_count, 2)
+        self.assertEqual(AnswerProofView.objects.filter(game_round=game_round).count(), 2)
+
+    def test_failed_video_delivery_does_not_consume_a_player_view(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-video",
+            proof_version=125,
+            proof_format="mp4",
+            proof_resource_type="video",
+        )
+        response = HttpResponse("Proof media could not be loaded.", status=502)
+
+        with patch("games.views.cloudinary_is_configured", return_value=True):
+            with patch(
+                "games.views.get_proof_media_response",
+                return_value=response,
+            ):
+                failed_view = self.host_client.post(
+                    f"/room/{self.room.code}/round/{game_round.pk}/proof/",
+                )
+
+        self.assertEqual(failed_view.status_code, 502)
+        self.assertFalse(
+            AnswerProofView.objects.filter(
+                game_round=game_round,
+                player=self.host,
+            ).exists(),
+        )
+
+    def test_video_proof_controls_are_rendered_for_room_players(self):
+        self.room.phase = "REVIEWING_ANSWER"
+        self.room.current_turn = self.guest
+        self.room.save(update_fields=["phase", "current_turn"])
+        game_round = GameRound.objects.create(
+            room=self.room,
+            game_number=self.room.game_number,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-video",
+            proof_version=125,
+            proof_format="mp4",
+            proof_resource_type="video",
+        )
+
+        response = self.guest_client.get(f"/room/{self.room.code}/")
+
+        self.assertContains(response, 'data-resource-type="video"')
+        self.assertContains(response, "Play video once")
+        self.assertContains(
+            response,
+            f"/room/{self.room.code}/round/{game_round.pk}/proof/",
+        )
+
+    def test_exhausted_game_restarts_only_after_both_players_confirm(self):
         self.room.game_type = "friends"
         self.room.difficulty = "easy"
         self.room.phase = "CHOOSING_TYPE"
@@ -426,23 +782,27 @@ class GameFlowTests(TestCase):
             exhausted_page,
             "Guest has chosen every prompt for this setup.",
         )
-        self.assertContains(exhausted_page, "Start a new game")
+        self.assertContains(exhausted_page, "Restart game")
         self.assertContains(exhausted_page, 'value="truth" disabled')
         self.assertContains(exhausted_page, 'value="dare" disabled')
 
-        forbidden = self.guest_client.post(
+        first_confirmation = self.guest_client.post(
             f"/room/{self.room.code}/new-game/",
+            {"restart_action": "request"},
         )
         self.assertRedirects(
-            forbidden,
+            first_confirmation,
             f"/room/{self.room.code}/",
             fetch_redirect_response=False,
         )
         self.room.refresh_from_db()
+        self.guest.refresh_from_db()
         self.assertEqual(self.room.game_number, 1)
+        self.assertTrue(self.guest.restart_requested)
 
         response = self.host_client.post(
             f"/room/{self.room.code}/new-game/",
+            {"restart_action": "request"},
         )
         self.assertRedirects(
             response,
@@ -465,6 +825,89 @@ class GameFlowTests(TestCase):
         self.room.refresh_from_db()
         self.assertEqual(len(self.room.prompt_options), 1)
         self.assertEqual(self.room.prompt_options[0], prompts[0].pk)
+
+    def test_restart_can_be_requested_during_a_round_and_cancelled(self):
+        self.room.phase = "AWAITING_ANSWER"
+        self.room.save(update_fields=["phase"])
+
+        requested = self.host_client.post(
+            f"/room/{self.room.code}/new-game/",
+            {"restart_action": "request"},
+        )
+
+        self.assertRedirects(
+            requested,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        self.room.refresh_from_db()
+        self.host.refresh_from_db()
+        self.assertEqual(self.room.phase, "AWAITING_ANSWER")
+        self.assertEqual(self.room.game_number, 1)
+        self.assertTrue(self.host.restart_requested)
+
+        heartbeat = self.guest_client.post(
+            f"/room/{self.room.code}/heartbeat/",
+        )
+        self.assertEqual(
+            heartbeat.json()["room_state"]["restart_requested_player_ids"],
+            [self.host.pk],
+        )
+
+        self.guest_client.post(
+            f"/room/{self.room.code}/new-game/",
+            {"restart_action": "cancel"},
+        )
+        self.host.refresh_from_db()
+        self.guest.refresh_from_db()
+        self.assertTrue(self.host.restart_requested)
+        self.assertFalse(self.guest.restart_requested)
+
+        cancelled = self.host_client.post(
+            f"/room/{self.room.code}/new-game/",
+            {"restart_action": "cancel"},
+        )
+        self.assertRedirects(
+            cancelled,
+            f"/room/{self.room.code}/",
+            fetch_redirect_response=False,
+        )
+        self.host.refresh_from_db()
+        self.assertFalse(self.host.restart_requested)
+
+    def test_restart_requires_two_room_players(self):
+        second_room = GameRoom.objects.create()
+        solo_player = Player.objects.create(
+            room=second_room,
+            nickname="Solo",
+            is_host=True,
+            session_key="solo-session-token",
+        )
+        solo_room_client = self.make_client_for_room(second_room, solo_player)
+
+        response = solo_room_client.post(
+            f"/room/{second_room.code}/new-game/",
+            {"restart_action": "request"},
+            follow=True,
+        )
+
+        second_room.refresh_from_db()
+        solo_player.refresh_from_db()
+        self.assertEqual(second_room.game_number, 1)
+        self.assertFalse(solo_player.restart_requested)
+        self.assertContains(
+            response,
+            "Both players must join before requesting a restart.",
+        )
+
+    def make_client_for_room(self, room, player):
+        client = Client()
+        session = client.session
+        session["room_player_tokens"] = {
+            str(room.pk): player.session_key,
+        }
+        session.save()
+        return client
 
     def test_round_history_shows_newest_round_first(self):
         GameRound.objects.create(
@@ -779,6 +1222,10 @@ class GameFlowTests(TestCase):
         self.assertContains(response, 'data-unread-count="1"')
         self.assertContains(response, "You’ve received a message")
         self.assertContains(response, "data-chat-badge")
+        self.assertContains(response, 'aria-label="Room navigation"')
+        self.assertContains(response, 'aria-label="Home"')
+        self.assertContains(response, "Restart game")
+        self.assertContains(response, "room-navigation.js")
 
     def test_player_can_toggle_or_change_one_reaction_per_answer(self):
         game_round = GameRound.objects.create(
@@ -918,6 +1365,26 @@ class GameFlowTests(TestCase):
             self.host.pk,
         )
 
+    def test_heartbeat_returns_new_prompt_options_for_the_other_player(self):
+        self.configure_game()
+        self.add_prompts(prompt_type="dare")
+        self.room.current_turn = self.host
+        self.room.phase = "CHOOSING_TYPE"
+        self.room.save(update_fields=["current_turn", "phase"])
+
+        self.host_client.post(
+            f"/room/{self.room.code}/type/",
+            {"prompt_type": "dare"},
+        )
+
+        heartbeat = self.guest_client.post(
+            f"/room/{self.room.code}/heartbeat/",
+        )
+
+        state = heartbeat.json()["room_state"]
+        self.assertEqual(state["phase"], "CHOOSING_PROMPT")
+        self.assertTrue(state["prompt_options"])
+
     def test_heartbeat_requires_a_room_player_session(self):
         response = Client().post(f"/room/{self.room.code}/heartbeat/")
 
@@ -928,7 +1395,7 @@ class GameFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Service-Worker-Allowed"], "/")
-        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v12"')
+        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v15"')
         self.assertContains(response, "event.request.mode === \"navigate\"")
         self.assertContains(response, "fetch(event.request).catch")
         self.assertNotContains(response, "cache.put(event.request")
@@ -1160,7 +1627,7 @@ class ManagementDashboardTests(TestCase):
 
         with patch("games.views.cloudinary_is_configured", return_value=True):
             with patch(
-                "games.views.get_proof_image_response",
+                "games.views.get_proof_media_response",
                 return_value=HttpResponse(
                     b"proof-image",
                     content_type="image/png",
@@ -1213,6 +1680,33 @@ class ManagementDashboardTests(TestCase):
             f"round/{game_round.pk}/proof/",
             fetch_redirect_response=False,
         )
+
+    def test_staff_room_history_renders_video_proof_with_replay_controls(self):
+        game_round = GameRound.objects.create(
+            room=self.room,
+            round_number=1,
+            prompt_text="A dare",
+            prompt_type="dare",
+            selected_by=self.guest,
+            challenged_player=self.host,
+            answer_type="media",
+            proof_public_id="truth-dare/proofs/test-video",
+            proof_version=125,
+            proof_format="mp4",
+            proof_resource_type="video",
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(f"/management/rooms/{self.room.code}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<video controls preload=\"metadata\">")
+        self.assertContains(
+            response,
+            f"/management/rooms/{self.room.code}/"
+            f"round/{game_round.pk}/proof/",
+        )
+        self.assertContains(response, 'type="video/mp4"')
 
     def test_staff_user_can_view_room_conversation_in_message_order(self):
         RoomMessage.objects.create(

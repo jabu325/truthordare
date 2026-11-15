@@ -1,4 +1,4 @@
-const CACHE_NAME = "truth-dare-arcade-v12";
+const CACHE_NAME = "truth-dare-arcade-v15";
 const OFFLINE_URL = "/static/games/offline.html";
 const APP_ASSETS = [
     OFFLINE_URL,
@@ -13,6 +13,7 @@ const APP_ASSETS = [
     "/static/games/turn-alert.js",
     "/static/games/presence.js",
     "/static/games/proof.js",
+    "/static/games/room-navigation.js",
 ];
 
 self.addEventListener("install", (event) => {

@@ -91,7 +91,7 @@ deployed hostname. Serve the app over HTTPS for PWA installation. The web
 app includes a Render deployment configuration; use persistent PostgreSQL
 storage rather than relying on an ephemeral host filesystem for game data.
 
-### Cloudinary proof images
+### Cloudinary proof media
 
 Create a Cloudinary account and set its `CLOUDINARY_URL` value in
 `web/.env.local` for local development and in the Render service's environment
@@ -101,9 +101,13 @@ Cloudinary storage; the app does not expose the Cloudinary delivery URL. Each
 player can request the proof once through the game, though this cannot prevent
 screenshots or saving an image after it has been displayed.
 
-Image proof is optional and limited to 5 MB per image. The other player must
-review every answer with a thumbs up or thumbs down. A thumbs-down costs the
-answering player one of five hearts; losing all hearts ends the game.
+Image proof (JPG, PNG, GIF, or WebP) is optional and limited to 5 MB per image.
+MP4 and WebM video proof is also supported up to 25 MB per video. Players can
+view proof once; staff can replay proofs in `/management`. The other player
+must review every answer with a thumbs up or thumbs down. A thumbs-down costs
+the answering player one of five hearts; losing all hearts ends the game.
+Either player can request a restart at any time; both players must confirm
+before the fresh setup begins. Earlier rounds remain in the room history.
 
 ### Deploying on Render
 

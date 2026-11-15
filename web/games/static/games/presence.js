@@ -125,7 +125,10 @@
     document.addEventListener("focusout", () => {
         window.setTimeout(reloadWhenSafe, 0);
     });
-    document.addEventListener("submit", () => {
+    document.addEventListener("submit", (event) => {
+        if (event.defaultPrevented) {
+            return;
+        }
         formSubmitting = true;
     });
     document.addEventListener("inviteactioncomplete", () => {

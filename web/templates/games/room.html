@@ -31,7 +31,24 @@
             </div>
         </header>
 
-        <div class="room-floating-actions">
+        <nav class="room-floating-actions" aria-label="Room navigation">
+            <a class="install-app-button room-nav-button room-home-button" href="{% url 'games:home' %}" aria-label="Home">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1z"></path>
+                </svg>
+            </a>
+            {% if room.phase != "WAITING" and room.phase != "CANCELLED" %}
+                <form class="room-restart-form" method="POST" action="{% url 'games:start_new_game' room.code %}" data-confirm-restart data-opponent-requested="{{ opponent_restart_requested|yesno:'true,false' }}">
+                    {% csrf_token %}
+                    {% if player.restart_requested %}
+                        <button class="install-app-button room-nav-button room-restart-button" type="submit" name="restart_action" value="cancel" aria-label="Cancel your restart request">↩ Cancel restart</button>
+                    {% else %}
+                        <button class="install-app-button room-nav-button room-restart-button" type="submit" name="restart_action" value="request" aria-label="{% if opponent_restart_requested %}Confirm restart{% else %}Request game restart{% endif %}">
+                            {% if opponent_restart_requested %}✅ Confirm restart{% else %}🔄 Restart game{% endif %}
+                        </button>
+                    {% endif %}
+                </form>
+            {% endif %}
             <button class="install-app-button room-chat-toggle" type="button" data-chat-open data-unread-count="{{ unread_count }}" aria-label="Open room chat{% if unread_count %}; {{ unread_count }} unread message{{ unread_count|pluralize }}{% endif %}" aria-expanded="false" aria-controls="room-chat-drawer">
                 <span aria-hidden="true">💬</span> Chat
                 <span class="chat-unread-badge" data-chat-badge {% if not unread_count %}hidden{% endif %} aria-hidden="true">{{ unread_count }}</span>
@@ -39,7 +56,7 @@
             <button class="install-app-button room-install-button" type="button" data-install-app hidden>
                 Install app
             </button>
-        </div>
+        </nav>
 
         <section class="chat-panel game-chat" aria-label="Game chat">
             <div class="chat-topbar">
@@ -262,14 +279,7 @@
                                 {% else %}
                                     <div class="bubble bubble-system">No prompts are available for this setup. Start a new game to choose a different category or difficulty.</div>
                                 {% endif %}
-                                {% if player.is_host %}
-                                    <form method="POST" action="{% url 'games:start_new_game' room.code %}">
-                                        {% csrf_token %}
-                                        <button class="button button-pink" type="submit">Start a new game</button>
-                                    </form>
-                                {% else %}
-                                    <div class="bubble bubble-system">Waiting for the host to start a new game...</div>
-                                {% endif %}
+                                <div class="bubble bubble-system">Use Restart game and both players must confirm before a fresh setup begins.</div>
                             </div>
                         </div>
                     {% endif %}
@@ -318,13 +328,13 @@
                                 <form method="POST" enctype="multipart/form-data" action="{% url 'games:submit_answer' room.code %}" class="answer-form">
                                     {% csrf_token %}
                                     <label class="sr-only" for="answer">Your answer</label>
-                                    <textarea id="answer" name="answer" maxlength="5000" placeholder="Type your answer..." required></textarea>
+                                    <textarea id="answer" name="answer" maxlength="5000" placeholder="{% if current_round.prompt_type == 'dare' and cloudinary_available %}Type your answer, or attach proof media...{% else %}Type your answer...{% endif %}" {% if current_round.prompt_type != "dare" or not cloudinary_available %}required{% endif %}></textarea>
                                     {% if current_round.prompt_type == "dare" %}
                                         {% if cloudinary_available %}
-                                            <label class="proof-upload-label" for="proof-image">Optional dare proof image (JPG, PNG, GIF, or WebP; up to 5 MB)</label>
-                                            <input id="proof-image" type="file" name="proof_image" accept="image/jpeg,image/png,image/gif,image/webp">
+                                            <label class="proof-upload-label" for="proof-media">Optional dare proof image (JPG, PNG, GIF, or WebP; up to 5 MB) or video (MP4 or WebM; up to 25 MB)</label>
+                                            <input id="proof-media" type="file" name="proof_media" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm">
                                         {% else %}
-                                            <p class="proof-upload-note">Image proof is unavailable until Cloudinary is configured. You can still submit a text answer.</p>
+                                            <p class="proof-upload-note">Proof media is unavailable until Cloudinary is configured. You can still submit a text answer.</p>
                                         {% endif %}
                                     {% endif %}
                                     <button class="button button-pink" type="submit">Send answer <span aria-hidden="true">↑</span></button>
@@ -347,14 +357,14 @@
                         <div class="avatar avatar-player {% if current_round.challenged_player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ current_round.challenged_player.nickname|first|upper }}</div>
                         <div class="message-stack">
                             <span class="message-author">{{ current_round.challenged_player.nickname|upper }} ANSWERED · {{ current_round.get_prompt_type_display|upper }}</span>
-                            <div class="bubble {% if current_round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">{{ current_round.answer_text }}</div>
+                            <div class="bubble {% if current_round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">{% if current_round.answer_text %}{{ current_round.answer_text }}{% elif current_round.proof_public_id %}Proof media submitted.{% endif %}</div>
                             {% if current_round.proof_public_id %}
                                 {% if current_round.proof_viewed %}
                                     <p class="proof-upload-note">You have used your one view of this proof.</p>
                                 {% else %}
-                                    <form class="proof-view-form" data-proof-view method="POST" action="{% url 'games:view_answer_proof' room.code current_round.pk %}">
+                                    <form class="proof-view-form" data-proof-view data-resource-type="{{ current_round.proof_resource_type }}" method="POST" action="{% url 'games:view_answer_proof' room.code current_round.pk %}">
                                         {% csrf_token %}
-                                        <button class="button button-purple" type="submit">👁 View proof once</button>
+                                        <button class="button button-purple" type="submit">{% if current_round.proof_resource_type == "video" %}▶ Play video once{% else %}👁 View image once{% endif %}</button>
                                     </form>
                                     <p class="proof-feedback" data-proof-feedback role="status" aria-live="polite"></p>
                                     <div class="proof-image-display" data-proof-display hidden></div>
@@ -368,7 +378,7 @@
                                 <span class="message-author">YOUR REVIEW</span>
                                 <div class="bubble {% if player.is_host %}bubble-host{% else %}bubble-guest{% endif %}">
                                     Is {{ current_round.challenged_player.nickname }}’s answer satisfying?
-                                    {% if current_round.proof_public_id %}Each player can view the proof once.{% endif %}
+                                    {% if current_round.proof_public_id %}Each player can view this proof once.{% endif %}
                                 </div>
                                 <form method="POST" action="{% url 'games:review_answer' room.code current_round.pk %}" class="answer-review-form">
                                     {% csrf_token %}
@@ -397,14 +407,7 @@
                             {% else %}
                                 <div class="bubble bubble-system">{{ room.winner.nickname }} won! You ran out of hearts — looks like your communication skills need work. 💔</div>
                             {% endif %}
-                            {% if player.is_host %}
-                                <form method="POST" action="{% url 'games:start_new_game' room.code %}">
-                                    {% csrf_token %}
-                                    <button class="button button-pink" type="submit">Start a new game</button>
-                                </form>
-                            {% else %}
-                                <div class="bubble bubble-system">The host can start a new game and choose a new setup.</div>
-                            {% endif %}
+                            <div class="bubble bubble-system">Both players can restart together whenever they’re ready.</div>
                         </div>
                     </div>
                 {% endif %}
@@ -437,11 +440,11 @@
                                             <div class="avatar avatar-player {% if round.challenged_player.is_host %}avatar-host{% else %}avatar-guest{% endif %}">{{ round.challenged_player.nickname|first|upper }}</div>
                                             <div class="bubble {% if round.challenged_player.is_host %}bubble-host{% else %}bubble-guest{% endif %} history-answer">
                                                 <span class="message-author">{{ round.challenged_player.nickname|upper }} ANSWERED</span>
-                                                {{ round.answer_text }}
+                                                {% if round.answer_text %}{{ round.answer_text }}{% elif round.proof_public_id %}<span class="proof-upload-note">Proof media submitted.</span>{% endif %}
                                                 {% if round.proof_public_id and not round.proof_viewed and not round.is_current_review %}
-                                                    <form class="proof-view-form" data-proof-view method="POST" action="{% url 'games:view_answer_proof' room.code round.pk %}">
+                                                    <form class="proof-view-form" data-proof-view data-resource-type="{{ round.proof_resource_type }}" method="POST" action="{% url 'games:view_answer_proof' room.code round.pk %}">
                                                         {% csrf_token %}
-                                                        <button class="button button-purple" type="submit">👁 View proof once</button>
+                                                        <button class="button button-purple" type="submit">{% if round.proof_resource_type == "video" %}▶ Play video once{% else %}👁 View image once{% endif %}</button>
                                                     </form>
                                                     <p class="proof-feedback" data-proof-feedback role="status" aria-live="polite"></p>
                                                     <div class="proof-image-display" data-proof-display hidden></div>
@@ -506,6 +509,7 @@
     <script src="{% static 'games/conversation.js' %}" defer></script>
     <script src="{% static 'games/turn-alert.js' %}" defer></script>
     <script src="{% static 'games/proof.js' %}" defer></script>
+    <script src="{% static 'games/room-navigation.js' %}" defer></script>
     <script src="{% static 'games/presence.js' %}" defer></script>
 </body>
 </html>

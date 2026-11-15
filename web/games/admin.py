@@ -65,7 +65,13 @@ class GameRoomAdmin(admin.ModelAdmin):
 
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
-    list_display = ("nickname", "room", "is_host", "is_connected")
+    list_display = (
+        "nickname",
+        "room",
+        "is_host",
+        "is_connected",
+        "restart_requested",
+    )
 
     search_fields = ("nickname", "room__code")
 

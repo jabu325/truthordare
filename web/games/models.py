@@ -199,6 +199,8 @@ class Player(models.Model):
 
     hearts = models.PositiveSmallIntegerField(default=5)
 
+    restart_requested = models.BooleanField(default=False)
+
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -290,6 +292,8 @@ class GameRound(models.Model):
     proof_version = models.PositiveBigIntegerField(null=True, blank=True)
 
     proof_format = models.CharField(max_length=10, blank=True)
+
+    proof_resource_type = models.CharField(max_length=10, default="image")
 
     answered_at = models.DateTimeField(null=True, blank=True)
 
