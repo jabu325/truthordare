@@ -1,4 +1,4 @@
-const CACHE_NAME = "truth-dare-arcade-v15";
+const CACHE_NAME = "truth-dare-arcade-v16";
 const OFFLINE_URL = "/static/games/offline.html";
 const APP_ASSETS = [
     OFFLINE_URL,

@@ -559,6 +559,70 @@ textarea:focus-visible {
     font-size: 8px;
 }
 
+.room-heading-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 7px;
+}
+
+.room-heading-icon {
+    position: relative;
+    display: inline-flex;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    color: #fff;
+    background: linear-gradient(135deg, #7654c5, #52358e);
+    border: 1px solid #a48ae0;
+    border-radius: 9px;
+    box-shadow: 0 7px 20px rgb(103 71 177 / 18%);
+    cursor: pointer;
+}
+
+.room-heading-icon:hover {
+    filter: brightness(1.12);
+}
+
+.room-heading-icon:focus-visible {
+    outline: 2px solid var(--pink-light);
+    outline-offset: 2px;
+}
+
+.room-heading-icon svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+.room-restart-form {
+    margin: 0;
+}
+
+.room-restart-button {
+    background: linear-gradient(135deg, #bd426b, #85314f);
+    border-color: #e783a2;
+}
+
+.restart-confirm-indicator {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    display: grid;
+    width: 15px;
+    height: 15px;
+    place-items: center;
+    color: #fff;
+    background: #248b58;
+    border: 1px solid #91e0b2;
+    border-radius: 50%;
+    font-size: 10px;
+    line-height: 1;
+}
+
 .room-code-badge {
     display: flex;
     flex-direction: column;
@@ -1452,34 +1516,6 @@ textarea:focus-visible {
     box-shadow: 0 7px 24px rgb(0 0 0 / 45%);
 }
 
-.room-nav-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 38px;
-    text-decoration: none;
-}
-
-.room-home-button {
-    width: 40px;
-    padding: 8px;
-}
-
-.room-home-button svg {
-    width: 20px;
-    height: 20px;
-    fill: currentColor;
-}
-
-.room-restart-form {
-    margin: 0;
-}
-
-.room-restart-button {
-    background: linear-gradient(135deg, #bd426b, #85314f);
-    border-color: #e783a2;
-}
-
 .room-chat-toggle,
 .room-chat-close {
     min-height: 34px;
@@ -1819,7 +1855,26 @@ textarea:focus-visible {
     }
 
     .room-heading {
-        gap: 10px;
+        gap: 8px;
+    }
+
+    .room-heading-copy {
+        min-width: 0;
+    }
+
+    .room-heading-actions {
+        gap: 5px;
+    }
+
+    .room-heading-icon {
+        width: 34px;
+        height: 34px;
+        padding: 7px;
+    }
+
+    .room-heading-icon svg {
+        width: 18px;
+        height: 18px;
     }
 
     .brand-mini {

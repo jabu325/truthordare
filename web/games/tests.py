@@ -1224,7 +1224,8 @@ class GameFlowTests(TestCase):
         self.assertContains(response, "data-chat-badge")
         self.assertContains(response, 'aria-label="Room navigation"')
         self.assertContains(response, 'aria-label="Home"')
-        self.assertContains(response, "Restart game")
+        self.assertContains(response, 'aria-label="Request game restart"')
+        self.assertContains(response, '<nav class="room-heading-actions"')
         self.assertContains(response, "room-navigation.js")
 
     def test_player_can_toggle_or_change_one_reaction_per_answer(self):
@@ -1395,7 +1396,7 @@ class GameFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Service-Worker-Allowed"], "/")
-        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v15"')
+        self.assertContains(response, 'const CACHE_NAME = "truth-dare-arcade-v16"')
         self.assertContains(response, "event.request.mode === \"navigate\"")
         self.assertContains(response, "fetch(event.request).catch")
         self.assertNotContains(response, "cache.put(event.request")

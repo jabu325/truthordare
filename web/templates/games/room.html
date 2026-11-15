@@ -25,30 +25,40 @@
                 <p class="eyebrow">THE FRIENDSHIP ARCADE</p>
                 <h1>{% if room.phase == "FINISHED" %}Game over{% else %}Game in progress{% endif %}</h1>
             </div>
+            <nav class="room-heading-actions" aria-label="Room navigation">
+                <a class="room-heading-icon room-home-button" href="{% url 'games:home' %}" aria-label="Home" title="Home">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1z"></path>
+                    </svg>
+                </a>
+                {% if room.phase != "WAITING" and room.phase != "CANCELLED" %}
+                    <form class="room-restart-form" method="POST" action="{% url 'games:start_new_game' room.code %}" data-confirm-restart data-opponent-requested="{{ opponent_restart_requested|yesno:'true,false' }}">
+                        {% csrf_token %}
+                        {% if player.restart_requested %}
+                            <button class="room-heading-icon room-restart-button" type="submit" name="restart_action" value="cancel" aria-label="Cancel your restart request" title="Cancel restart request">
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M12 3a9 9 0 1 0 8.49 12h-2.13A7 7 0 1 1 12 5c1.93 0 3.68.79 4.95 2.05L14 10h7V3l-2.64 2.64A8.96 8.96 0 0 0 12 3z"></path>
+                                    <path d="m9 9 6 6m0-6-6 6" fill="none" stroke="currentColor" stroke-width="2"></path>
+                                </svg>
+                            </button>
+                        {% else %}
+                            <button class="room-heading-icon room-restart-button" type="submit" name="restart_action" value="request" aria-label="{% if opponent_restart_requested %}Confirm restart{% else %}Request game restart{% endif %}" title="{% if opponent_restart_requested %}Confirm restart{% else %}Restart game{% endif %}">
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.16.67 4.24 1.76L13 11h8V3l-3.34 3.34A7.96 7.96 0 0 0 12 4z"></path>
+                                </svg>
+                                {% if opponent_restart_requested %}<span class="restart-confirm-indicator" aria-hidden="true">✓</span>{% endif %}
+                            </button>
+                        {% endif %}
+                    </form>
+                {% endif %}
+            </nav>
             <div class="room-code-badge">
                 <span>ROOM CODE</span>
                 <strong>{{ room.code }}</strong>
             </div>
         </header>
 
-        <nav class="room-floating-actions" aria-label="Room navigation">
-            <a class="install-app-button room-nav-button room-home-button" href="{% url 'games:home' %}" aria-label="Home">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1z"></path>
-                </svg>
-            </a>
-            {% if room.phase != "WAITING" and room.phase != "CANCELLED" %}
-                <form class="room-restart-form" method="POST" action="{% url 'games:start_new_game' room.code %}" data-confirm-restart data-opponent-requested="{{ opponent_restart_requested|yesno:'true,false' }}">
-                    {% csrf_token %}
-                    {% if player.restart_requested %}
-                        <button class="install-app-button room-nav-button room-restart-button" type="submit" name="restart_action" value="cancel" aria-label="Cancel your restart request">↩ Cancel restart</button>
-                    {% else %}
-                        <button class="install-app-button room-nav-button room-restart-button" type="submit" name="restart_action" value="request" aria-label="{% if opponent_restart_requested %}Confirm restart{% else %}Request game restart{% endif %}">
-                            {% if opponent_restart_requested %}✅ Confirm restart{% else %}🔄 Restart game{% endif %}
-                        </button>
-                    {% endif %}
-                </form>
-            {% endif %}
+        <nav class="room-floating-actions" aria-label="Room tools">
             <button class="install-app-button room-chat-toggle" type="button" data-chat-open data-unread-count="{{ unread_count }}" aria-label="Open room chat{% if unread_count %}; {{ unread_count }} unread message{{ unread_count|pluralize }}{% endif %}" aria-expanded="false" aria-controls="room-chat-drawer">
                 <span aria-hidden="true">💬</span> Chat
                 <span class="chat-unread-badge" data-chat-badge {% if not unread_count %}hidden{% endif %} aria-hidden="true">{{ unread_count }}</span>
