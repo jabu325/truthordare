@@ -7,8 +7,8 @@ web version is a Django app with a chat-style interface and installable PWA.
 
 - Telegram bot for playing Truth or Dare in Telegram.
 - Local admin panel for reviewing bot sessions and supported media answers.
-- Two-player web rooms with invite codes, nicknames, turn-based rounds, and
-  recent-first round history.
+- Two-player web rooms with shareable invite links, room-code fallback,
+  nicknames, turn-based rounds, and recent-first round history.
 - Rejoining a seat with the same room code and nickname.
 - Player activity indicators and PWA installation support.
 - Staff-only web game records dashboard using Django admin accounts.
@@ -151,6 +151,10 @@ cd web
 
 The import command skips prompts that already exist, so it can safely be run
 again if needed.
+
+For the complete deployment checklist, including Neon connection setup,
+Render commands, prompt import, and creating the first admin user, see
+[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).
 
 ## Data and secrets
 
